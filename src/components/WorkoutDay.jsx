@@ -355,6 +355,9 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
   }
 
   const isRestDay = day.exercises.every(e => e.item_type === 'activity') // true for empty days too
+  const isEmpty   = day.exercises.length === 0
+  const isGymDay  = !isEmpty && exerciseItems.length >= activityItems.length
+  const titleColor = isEmpty ? '#666' : isGymDay ? 'var(--accent)' : 'var(--cyan)'
 
   const lastDate = lastSession?.workout?.completed_at
     ? new Date(lastSession.workout.completed_at).toLocaleDateString('en-US', {
@@ -372,7 +375,7 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
         <header className="workout-header">
           <button className="back-btn" onClick={onBack}>←</button>
           <div className="workout-header__info">
-            <div className="workout-header__name">{headerLabel}</div>
+            <div className="workout-header__name" style={{ color: titleColor }}>{headerLabel}</div>
           </div>
           {lastDate && <div className="workout-header__last">Last: {lastDate}</div>}
           <button
