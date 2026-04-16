@@ -26,6 +26,7 @@
 html, body, #root {
   height: 100%;
   width: 100%;
+  overflow-x: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
@@ -70,6 +71,7 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
+  width: 100%;
   max-width: 480px;
   margin: 0 auto;
 }
@@ -612,7 +614,7 @@ a { color: inherit; text-decoration: none; }
 /* ── Sets ─────────────────────────────────────────── */
 .sets-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
 
-.set-row { display: flex; align-items: center; gap: 10px; }
+.set-row { display: flex; align-items: center; gap: 8px; }
 .set-num {
   font-size: 12px;
   color: var(--text-muted);
@@ -621,13 +623,13 @@ a { color: inherit; text-decoration: none; }
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
-.set-input-group { flex: 1; display: flex; align-items: center; gap: 6px; }
+.set-input-group { flex: 1; display: flex; align-items: center; gap: 4px; }
 .set-input {
   flex: 1;
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  padding: 10px 8px;
   font-size: 16px;
   text-align: center;
   -webkit-appearance: none;
