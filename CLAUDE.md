@@ -33,3 +33,4 @@ Deployed target: Vercel. Local dev: localhost:5173.
 - Plan before coding
 - Print all SQL needed before touching any component
 - Never leave a spinner with no timeout
+
