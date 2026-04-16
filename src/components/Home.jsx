@@ -1,0 +1,276 @@
+import React, { useState, useEffect } from 'react'
+import { getBodyWeightLogs, logBodyWeight, getWeeklyProgress } from '../supabase'
+
+const DAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+const DAY_ABBREV = {
+  Monday: 'MON', Tuesday: 'TUE', Wednesday: 'WED', Thursday: 'THU',
+  Friday: 'FRI', Saturday: 'SAT', Sunday: 'SUN',
+}
+
+function getToday() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function fmtDate(iso) {
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
+// ── Completion ring ───────────────────────────────────────────
+function CompletionRing({ completed, target }) {
+  const SIZE = 76, CX = 38, R = 30, SW = 6
+  const C          = 2 * Math.PI * R
+  const progress   = target > 0 ? completed / target : 0
+  const capped     = Math.min(progress, 1)
+  const dashOffset = (C * (1 - capped)).toFixed(2)
+  const done       = completed > 0 && completed >= target
+  const ringColor  = done ? 'var(--success)' : 'var(--accent)'
+
+  return (
+    <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} className="ring-svg">
+      {/* Track */}
+      <circle cx={CX} cy={CX} r={R} fill="none"
+        stroke="var(--surface3)" strokeWidth={SW} />
+      {/* Progress arc */}
+      {completed > 0 && (
+        <circle cx={CX} cy={CX} r={R} fill="none"
+          stroke={ringColor}
+          strokeWidth={SW}
+          strokeLinecap="round"
+          strokeDasharray={C.toFixed(2)}
+          strokeDashoffset={dashOffset}
+          transform={`rotate(-90 ${CX} ${CX})`}
+        />
+      )}
+      {/* Centre: session count */}
+      <text x={CX} y={CX - 5} textAnchor="middle"
+        dominantBaseline="central" className="ring-count">
+        {completed}
+      </text>
+      {/* Centre: /target */}
+      <text x={CX} y={CX + 11} textAnchor="middle"
+        dominantBaseline="central" className="ring-sub">
+        /{target}
+      </text>
+    </svg>
+  )
+}
+
+function weeklyMessage(completed, target) {
+  if (completed === 0)        return 'No sessions yet this week'
+  if (completed > target)     return `${completed} sessions this week — above target`
+  if (completed === target)   return 'Target hit — great week!'
+  const rem = target - completed
+  return `${rem} more to hit your target`
+}
+
+// ── Main component ────────────────────────────────────────────
+export default function Home({ program, userId, onSelectDay, onProfile }) {
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long' })
+
+  const [lastWeight,     setLastWeight]     = useState(null)
+  const [showForm,       setShowForm]       = useState(false)
+  const [weightInput,    setWeightInput]    = useState('')
+  const [dateInput,      setDateInput]      = useState(getToday)
+  const [saving,         setSaving]         = useState(false)
+  const [error,          setError]          = useState('')
+  const [weeklyProgress, setWeeklyProgress] = useState(null)
+
+  useEffect(() => {
+    if (!userId) return
+    getBodyWeightLogs(userId, 1)
+      .then(logs => setLastWeight(logs[0] || null))
+      .catch(() => {})
+    getWeeklyProgress(userId)
+      .then(setWeeklyProgress)
+      .catch(() => {})
+  }, [userId])
+
+  const handleLogWeight = async () => {
+    const kg = parseFloat(weightInput)
+    if (isNaN(kg) || kg <= 0) { setError('Enter a valid weight'); return }
+    setSaving(true)
+    setError('')
+    try {
+      const saved = await logBodyWeight(
+        kg,
+        new Date(dateInput + 'T12:00:00').toISOString(),
+        null,
+        userId
+      )
+      setLastWeight(saved)
+      setWeightInput('')
+      setDateInput(getToday())
+      setShowForm(false)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const sorted = program.filter(d => DAY_ORDER.includes(d.name)).sort((a, b) => {
+    const ai = DAY_ORDER.indexOf(a.name)
+    const bi = DAY_ORDER.indexOf(b.name)
+    if (ai === -1 && bi === -1) return 0
+    if (ai === -1) return 1
+    if (bi === -1) return -1
+    return ai - bi
+  })
+
+  const weekDone = weeklyProgress
+    && weeklyProgress.completed > 0
+    && weeklyProgress.completed >= weeklyProgress.target
+
+  return (
+    <div className="screen">
+      <header className="home-header">
+        <div>
+          <h1 className="home-title">Session</h1>
+          <div className="home-subtitle">What are we attacking today</div>
+          <div className="home-date">
+            {new Date().toLocaleDateString('en-US', {
+              weekday: 'short', month: 'short', day: 'numeric',
+            })}
+          </div>
+        </div>
+        <button className="profile-btn" onClick={onProfile} aria-label="Profile">
+          <svg className="orbit-ring-svg" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="26" cy="26" r="23.5" fill="none" stroke="#00C2A8"
+              strokeWidth="1.5" strokeDasharray="4 3" />
+          </svg>
+          <span className="profile-btn__icon">👤</span>
+        </button>
+      </header>
+
+      {/* ── Weekly completion ring ───────────────────── */}
+      {weeklyProgress && (
+        <div className={`week-card${weekDone ? ' week-card--done' : ''}`}>
+          <CompletionRing
+            completed={weeklyProgress.completed}
+            target={weeklyProgress.target}
+          />
+          <div className="week-card-text">
+            <div className="week-card-title">This week</div>
+            <div className={`week-card-sub${weekDone ? ' week-card-sub--done' : ''}`}>
+              {weeklyMessage(weeklyProgress.completed, weeklyProgress.target)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Weight bar ──────────────────────────────────── */}
+      <div className="weight-bar">
+        <div className="weight-bar-inner">
+          <div className="weight-bar-left">
+            <div className="weight-bar-label">Bodyweight</div>
+            <span className="weight-bar-reading">
+              {lastWeight
+                ? <>{Number(lastWeight.weight_kg).toFixed(1)} <span className="weight-bar-unit">kg</span> <span className="weight-bar-dot">·</span> {fmtDate(lastWeight.logged_at)}</>
+                : <span className="weight-bar-empty">No log yet</span>
+              }
+            </span>
+          </div>
+          <button
+            className={`weight-bar-btn ${showForm ? 'weight-bar-btn--cancel' : ''}`}
+            onClick={() => { setShowForm(f => !f); setError('') }}
+          >
+            {showForm ? 'Cancel' : 'LOG IT'}
+          </button>
+        </div>
+
+        {showForm && (
+          <div className="weight-bar-form">
+            <div className="weight-bar-form-row">
+              <input
+                className="field-input weight-bar-input"
+                type="number"
+                inputMode="decimal"
+                step="0.1"
+                placeholder="kg"
+                value={weightInput}
+                onChange={e => { setWeightInput(e.target.value); setError('') }}
+                onKeyDown={e => e.key === 'Enter' && handleLogWeight()}
+                autoFocus
+              />
+              <input
+                className="field-input weight-bar-input"
+                type="date"
+                value={dateInput}
+                onChange={e => setDateInput(e.target.value)}
+              />
+            </div>
+            {error && <div className="weight-bar-error">{error}</div>}
+            <button
+              className="weight-bar-save"
+              onClick={handleLogWeight}
+              disabled={saving}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Day grid ────────────────────────────────────── */}
+      {sorted.length === 0 ? (
+        <div className="state-msg">No days set up yet.</div>
+      ) : (
+        <div className="day-grid">
+          {sorted.map((day, i) => {
+            const isToday  = day.name.toLowerCase() === today.toLowerCase()
+            const items    = day.exercises || []
+            const exCount  = items.filter(e => e.item_type !== 'activity').length
+            const actCount = items.filter(e => e.item_type === 'activity').length
+            const isEmpty  = items.length === 0
+            const isGymDay = !isEmpty && exCount >= actCount
+
+            let countLabel
+            if (exCount > 0 && actCount > 0)
+              countLabel = `${exCount} movement${exCount !== 1 ? 's' : ''} · ${actCount} drill${actCount !== 1 ? 's' : ''}`
+            else if (exCount > 0)
+              countLabel = `${exCount} movement${exCount !== 1 ? 's' : ''}`
+            else if (actCount > 0)
+              countLabel = `${actCount} drill${actCount !== 1 ? 's' : ''}`
+            else
+              countLabel = 'Rest day'
+
+            const typeClass     = isEmpty ? 'day-card--empty' : isGymDay ? 'day-card--gym' : 'day-card--rest'
+            const indicatorType = isEmpty ? 'empty' : isGymDay ? 'gym' : 'rest'
+
+            return (
+              <button
+                key={day.id}
+                className={`day-card ${typeClass}${isToday ? ' day-card--today' : ''}`}
+                style={{ animationDelay: `${i * 50}ms` }}
+                onClick={() => onSelectDay(day)}
+              >
+                {isToday && (
+                  <div className={`day-card__stripe day-card__stripe--${indicatorType}`}>
+                    <span className="day-card__abbr">{DAY_ABBREV[day.name] || day.name.slice(0, 3).toUpperCase()}</span>
+                    <div className="day-card__pulse-dot" />
+                  </div>
+                )}
+                <div className="day-card__content">
+                  <div className="day-card__name">{day.name}</div>
+                  {day.focus
+                    ? <div className="day-card__focus">{day.focus}</div>
+                    : (!isGymDay && !isEmpty && <div className="day-card__focus">rest / move</div>)
+                  }
+                  <div className="day-card__count">{countLabel}</div>
+                </div>
+                <div className="day-card__indicator-wrap">
+                  <div className={`day-card__indicator-circle day-card__indicator-circle--${indicatorType}`}>
+                    <div className="day-card__indicator-dash" />
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      <div style={{ height: 40 }} />
+    </div>
+  )
+}
