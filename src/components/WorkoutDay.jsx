@@ -365,9 +365,6 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
       })
     : null
 
-  const headerLabel = day.focus
-    ? `${day.name} — ${day.focus}`
-    : day.name
 
   return (
     <div className="screen">
@@ -375,7 +372,10 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
         <header className="workout-header">
           <button className="back-btn" onClick={onBack}>←</button>
           <div className="workout-header__info">
-            <div className="workout-header__name" style={{ color: titleColor }}>{headerLabel}</div>
+            <div className="workout-header__name">
+              {day.name}
+              {day.focus && <><span style={{ color: 'var(--text-muted)' }}> — </span><span style={{ color: titleColor }}>{day.focus}</span></>}
+            </div>
           </div>
           {lastDate && <div className="workout-header__last">Last: {lastDate}</div>}
           <button
