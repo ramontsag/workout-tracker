@@ -20,6 +20,7 @@ export default function App() {
   const [activeDay,       setActiveDay]      = useState(null)
   const [activeExercise,  setActiveExercise] = useState(null)
   const [totalWorkouts,   setTotalWorkouts]  = useState(null)
+  const [totalActivities, setTotalActivities] = useState(null)
 
   const screenRef = useRef('loading')
   const go = (s) => { screenRef.current = s; setScreen(s) }
@@ -50,18 +51,22 @@ export default function App() {
           if (session?.user) {
             setUser(session.user)
             await loadProgram()
-            getStats().then(s => setTotalWorkouts(s.totalWorkouts)).catch(() => {})
+            getStats().then(s => { setTotalWorkouts(s.totalWorkouts); setTotalActivities(s.totalActivities) }).catch(() => {})
           } else go('auth')
 
         } else if (event === 'SIGNED_IN') {
           if (session?.user) {
             setUser(session.user)
-            await loadProgram()
-            getStats().then(s => setTotalWorkouts(s.totalWorkouts)).catch(() => {})
+            // Only navigate on a real sign-in; token refreshes also fire SIGNED_IN
+            // but we must not disrupt an active screen (e.g. mid-workout logging)
+            if (screenRef.current === 'auth') {
+              await loadProgram()
+              getStats().then(s => { setTotalWorkouts(s.totalWorkouts); setTotalActivities(s.totalActivities) }).catch(() => {})
+            }
           }
 
         } else if (event === 'SIGNED_OUT') {
-          setUser(null); setProgram([]); setActiveDay(null); setTotalWorkouts(null)
+          setUser(null); setProgram([]); setActiveDay(null); setTotalWorkouts(null); setTotalActivities(null)
           go('auth')
         }
       }
@@ -120,6 +125,7 @@ export default function App() {
       <ProfileScreen
         user={user}
         totalWorkouts={totalWorkouts}
+        totalActivities={totalActivities}
         onBack={() => go('home')}
         onEditProgram={() => go('setup')}
         onProgress={() => go('progress')}

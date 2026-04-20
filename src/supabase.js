@@ -397,39 +397,34 @@ function getWeekStart() {
   return mon.toISOString()
 }
 
-// Counts workouts + activity_sessions logged since Monday 00:00 local time,
-// and reads weekly_target from the user's profile. RLS handles row filtering.
+// Counts sessions since Monday 00:00 local time.
+// - workouts: rows in the workouts table this week (each session = 1)
+// - activities: checked workout_sets rows this week (needs checked column migration)
+// Returns { completed, target, workouts, activities }
 export async function getWeeklyProgress(uid) {
   if (!uid) throw new Error('Not authenticated')
   const weekStart = getWeekStart()
 
-  const [profileRes, workoutsRes, activitiesRes] = await Promise.all([
+  const [profileRes, weekWorkoutsRes] = await Promise.all([
     withTimeout(
-      supabase.from('profiles').select('weekly_target').single(),
+      supabase.from('profiles').select('weekly_target').eq('id', uid).single(),
       5000, 'Load weekly target'
     ),
     withTimeout(
-      supabase
-        .from('workouts')
-        .select('id', { count: 'exact', head: true })
-        .gte('completed_at', weekStart),
+      supabase.from('workouts').select('id, day_name').eq('user_id', uid).gte('completed_at', weekStart),
       5000, 'Load week workouts'
     ),
-    withTimeout(
-      supabase
-        .from('activity_sessions')
-        .select('id', { count: 'exact', head: true })
-        .gte('completed_at', weekStart),
-      5000, 'Load week activities'
-    ).catch(() => ({ count: 0 })),  // non-fatal if no activity sessions exist
   ])
 
-  if (profileRes.error)  throw new Error(`Load progress failed: ${profileRes.error.message}`)
-  if (workoutsRes.error) throw new Error(`Load progress failed: ${workoutsRes.error.message}`)
+  if (profileRes.error)     throw new Error(`Load progress failed: ${profileRes.error.message}`)
+  if (weekWorkoutsRes.error) throw new Error(`Load progress failed: ${weekWorkoutsRes.error.message}`)
 
-  const target    = profileRes.data?.weekly_target ?? 4
-  const completed = (workoutsRes.count || 0) + (activitiesRes.count || 0)
-  return { completed, target }
+  const target       = profileRes.data?.weekly_target ?? 4
+  const weekWorkouts = weekWorkoutsRes.data || []
+  const workoutCount = weekWorkouts.length
+
+  // Each completed session = 1 unit of progress, regardless of what's inside it
+  return { completed: workoutCount, target, workouts: workoutCount, activities: 0 }
 }
 
 // Updates weekly_target on the current user's profile row.
@@ -447,12 +442,18 @@ export async function saveWeeklyTarget(target, uid) {
 // ── Stats ─────────────────────────────────────────────────────
 
 export async function getStats() {
-  const { count, error } = await withTimeout(
-    supabase.from('workouts').select('*', { count: 'exact', head: true }),
-    5000, 'Load stats'
-  )
-  if (error) throw new Error(`Load stats failed: ${error.message}`)
-  return { totalWorkouts: count || 0 }
+  const [workoutsRes, activitiesRes] = await Promise.all([
+    withTimeout(
+      supabase.from('workouts').select('*', { count: 'exact', head: true }),
+      5000, 'Load stats'
+    ),
+    withTimeout(
+      supabase.from('workout_sets').select('*', { count: 'exact', head: true }).eq('checked', true),
+      5000, 'Load activity stats'
+    ).catch(() => ({ count: 0 })),
+  ])
+  if (workoutsRes.error) throw new Error(`Load stats failed: ${workoutsRes.error.message}`)
+  return { totalWorkouts: workoutsRes.count || 0, totalActivities: activitiesRes.count || 0 }
 }
 
 // ── Volume Comparison ─────────────────────────────────────────

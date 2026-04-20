@@ -83,7 +83,7 @@ function progressIndicator(sets, lastSets) {
 }
 
 // ── Exercise item card (weight + reps per set) ────────────────
-function ExerciseCard({ exercise, sets, lastSets, prSetIdx, onUpdate, onAdd, onRemove, onHistory }) {
+function ExerciseCard({ exercise, sets, lastSets, prSetIdx, onUpdate, onConfirm, onAdd, onRemove, onHistory }) {
   const prog = progressIndicator(sets, lastSets)
   const lastSummary = lastSets.length > 0
     ? lastSets.map(s => `${fmt(s.weight_kg)}kg×${fmt(s.reps)}`).join(' · ')
@@ -111,7 +111,7 @@ function ExerciseCard({ exercise, sets, lastSets, prSetIdx, onUpdate, onAdd, onR
           const prev = lastSets[idx]
           return (
             <React.Fragment key={idx}>
-              <div className="set-row">
+              <div className={`set-row${set.done ? ' set-row--done' : ''}`}>
                 <span className="set-num">{idx + 1}</span>
                 <div className="set-input-group">
                   <input
@@ -133,6 +133,11 @@ function ExerciseCard({ exercise, sets, lastSets, prSetIdx, onUpdate, onAdd, onR
                   />
                 </div>
                 {idx === prSetIdx && <span className="set-pr-badge">PR</span>}
+                <button
+                  className={`set-tick${set.done ? ' set-tick--done' : ''}`}
+                  onClick={() => onConfirm(idx)}
+                  title={set.done ? 'Done' : 'Mark set done'}
+                >✓</button>
                 {sets.length > 1 && (
                   <button className="set-remove" onClick={() => onRemove(idx)}>×</button>
                 )}
@@ -186,8 +191,8 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
   const [sets, setSets] = useState(() =>
     Object.fromEntries(
       exerciseItems.map(ex => [ex.name, [
-        { weight: '', reps: '' },
-        { weight: '', reps: '' },
+        { weight: '', reps: '', done: false },
+        { weight: '', reps: '', done: false },
       ]])
     )
   )
@@ -231,7 +236,7 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
         const prevCount = lastSession.sets.filter(s => s.exercise_name === exName).length
         const count = prevCount > 0 ? prevCount : 2
         if (count !== currentSets.length) {
-          next[exName] = Array.from({ length: count }, () => ({ weight: '', reps: '' }))
+          next[exName] = Array.from({ length: count }, () => ({ weight: '', reps: '', done: false }))
         }
       }
       return next
@@ -274,15 +279,21 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
       ...prev,
       [exName]: prev[exName].map((s, i) => i === idx ? { ...s, [field]: value } : s),
     }))
-    // Start rest timer when reps are entered — only if timer is enabled
-    if (field === 'reps' && value !== '' && timerEnabled) {
+  }
+
+  const confirmSet = (exName, idx) => {
+    setSets(prev => ({
+      ...prev,
+      [exName]: prev[exName].map((s, i) => i === idx ? { ...s, done: true } : s),
+    }))
+    if (timerEnabled) {
       setTimerKey(k => k + 1)
       setTimerActive(true)
     }
   }
 
   const addSet = (exName) =>
-    setSets(prev => ({ ...prev, [exName]: [...prev[exName], { weight: '', reps: '' }] }))
+    setSets(prev => ({ ...prev, [exName]: [...prev[exName], { weight: '', reps: '', done: false }] }))
 
   const removeSet = (exName, idx) =>
     setSets(prev => ({ ...prev, [exName]: prev[exName].filter((_, i) => i !== idx) }))
@@ -419,6 +430,7 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
               lastSets={getLastSets(item.name)}
               prSetIdx={prFlags[item.name]}
               onUpdate={(idx, field, val) => updateSet(item.name, idx, field, val)}
+              onConfirm={idx => confirmSet(item.name, idx)}
               onAdd={() => addSet(item.name)}
               onRemove={idx => removeSet(item.name, idx)}
               onHistory={() => onHistory(item.name)}

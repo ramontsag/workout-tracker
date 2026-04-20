@@ -19,26 +19,42 @@ function fmtDate(iso) {
 // ── Completion ring ───────────────────────────────────────────
 function CompletionRing({ completed, target }) {
   const SIZE = 76, CX = 38, R = 30, SW = 6
-  const C          = 2 * Math.PI * R
-  const progress   = target > 0 ? completed / target : 0
-  const capped     = Math.min(progress, 1)
-  const dashOffset = (C * (1 - capped)).toFixed(2)
-  const done       = completed > 0 && completed >= target
-  const ringColor  = done ? 'var(--success)' : 'var(--accent)'
+  const C        = 2 * Math.PI * R
+  const progress = target > 0 ? completed / target : 0
+  const over     = progress > 1
+  const capped   = Math.min(progress, 1)
+  const ringColor = over ? '#FFB800' : capped >= 1 ? 'var(--success)' : 'var(--accent)'
+
+  // When over target, show a second arc for the overflow (up to 110%)
+  const overflowPct    = over ? Math.min((progress - 1) / 0.1, 1) : 0
+  const overflowOffset = (C * (1 - overflowPct)).toFixed(2)
+  const mainOffset     = over ? '0' : (C * (1 - capped)).toFixed(2)
 
   return (
     <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} className="ring-svg">
       {/* Track */}
       <circle cx={CX} cy={CX} r={R} fill="none"
         stroke="var(--surface3)" strokeWidth={SW} />
-      {/* Progress arc */}
+      {/* Main arc */}
       {completed > 0 && (
         <circle cx={CX} cy={CX} r={R} fill="none"
           stroke={ringColor}
           strokeWidth={SW}
           strokeLinecap="round"
           strokeDasharray={C.toFixed(2)}
-          strokeDashoffset={dashOffset}
+          strokeDashoffset={mainOffset}
+          transform={`rotate(-90 ${CX} ${CX})`}
+        />
+      )}
+      {/* Overflow arc — thinner ring on top when over target */}
+      {over && (
+        <circle cx={CX} cy={CX} r={R} fill="none"
+          stroke="#fff"
+          strokeWidth={SW - 3}
+          strokeOpacity={0.35}
+          strokeLinecap="round"
+          strokeDasharray={C.toFixed(2)}
+          strokeDashoffset={overflowOffset}
           transform={`rotate(-90 ${CX} ${CX})`}
         />
       )}
@@ -56,12 +72,26 @@ function CompletionRing({ completed, target }) {
   )
 }
 
-function weeklyMessage(completed, target) {
-  if (completed === 0)        return 'No sessions yet this week'
-  if (completed > target)     return `${completed} sessions this week — above target`
-  if (completed === target)   return 'Target hit — great week!'
+const OVER_MESSAGES = [
+  'Beast mode — way above target!',
+  'Absolutely smashing it this week.',
+  'Target obliterated. Respect.',
+  'You set the bar, then cleared it.',
+]
+
+function weeklyMessage(completed, target, workouts, activities) {
+  if (completed === 0) return 'No sessions yet this week'
+  const breakdown = [
+    workouts  > 0 ? `${workouts} workout${workouts  !== 1 ? 's' : ''}` : null,
+    activities > 0 ? `${activities} activit${activities !== 1 ? 'ies' : 'y'}` : null,
+  ].filter(Boolean).join(' · ')
+  if (completed > target) {
+    const msg = OVER_MESSAGES[(completed - target - 1) % OVER_MESSAGES.length]
+    return breakdown ? `${msg} (${breakdown})` : msg
+  }
+  if (completed === target) return `Target hit — great week!${breakdown ? ` (${breakdown})` : ''}`
   const rem = target - completed
-  return `${rem} more to hit your target`
+  return `${rem} more to hit your target${breakdown ? ` · ${breakdown}` : ''}`
 }
 
 // ── Main component ────────────────────────────────────────────
@@ -109,6 +139,8 @@ export default function Home({ program, userId, onSelectDay, onProfile }) {
     }
   }
 
+  const [pendingDay, setPendingDay] = useState(null)
+
   const sorted = program.filter(d => DAY_ORDER.includes(d.name)).sort((a, b) => {
     const ai = DAY_ORDER.indexOf(a.name)
     const bi = DAY_ORDER.indexOf(b.name)
@@ -121,6 +153,7 @@ export default function Home({ program, userId, onSelectDay, onProfile }) {
   const weekDone = weeklyProgress
     && weeklyProgress.completed > 0
     && weeklyProgress.completed >= weeklyProgress.target
+  const weekOver = weeklyProgress && weeklyProgress.completed > weeklyProgress.target
 
   return (
     <div className="screen">
@@ -145,15 +178,15 @@ export default function Home({ program, userId, onSelectDay, onProfile }) {
 
       {/* ── Weekly completion ring ───────────────────── */}
       {weeklyProgress && (
-        <div className={`week-card${weekDone ? ' week-card--done' : ''}`}>
+        <div className={`week-card${weekDone ? ' week-card--done' : ''}${weekOver ? ' week-card--over' : ''}`}>
           <CompletionRing
             completed={weeklyProgress.completed}
             target={weeklyProgress.target}
           />
           <div className="week-card-text">
             <div className="week-card-title">This week</div>
-            <div className={`week-card-sub${weekDone ? ' week-card-sub--done' : ''}`}>
-              {weeklyMessage(weeklyProgress.completed, weeklyProgress.target)}
+            <div className={`week-card-sub${weekDone ? ' week-card-sub--done' : ''}${weekOver ? ' week-card-sub--over' : ''}`}>
+              {weeklyMessage(weeklyProgress.completed, weeklyProgress.target, weeklyProgress.workouts, weeklyProgress.activities)}
             </div>
           </div>
         </div>
@@ -243,7 +276,7 @@ export default function Home({ program, userId, onSelectDay, onProfile }) {
                 key={day.id}
                 className={`day-card ${typeClass}${isToday ? ' day-card--today' : ''}`}
                 style={{ animationDelay: `${i * 50}ms` }}
-                onClick={() => onSelectDay(day)}
+                onClick={() => isToday ? onSelectDay(day) : setPendingDay(day)}
               >
                 {isToday && (
                   <div className={`day-card__stripe day-card__stripe--${indicatorType}`}>
@@ -271,6 +304,27 @@ export default function Home({ program, userId, onSelectDay, onProfile }) {
       )}
 
       <div style={{ height: 40 }} />
+
+      {pendingDay && (
+        <div className="makeup-overlay" onClick={() => setPendingDay(null)}>
+          <div className="makeup-sheet" onClick={e => e.stopPropagation()}>
+            <div className="makeup-sheet__title">
+              {pendingDay.name}{pendingDay.focus ? <span className="makeup-sheet__focus"> — {pendingDay.focus}</span> : null}
+            </div>
+            <div className="makeup-sheet__sub">
+              Logging for today, {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+            </div>
+            <div className="makeup-sheet__btns">
+              <button className="makeup-sheet__go" onClick={() => { onSelectDay(pendingDay); setPendingDay(null) }}>
+                Start {pendingDay.name}'s Workout
+              </button>
+              <button className="makeup-sheet__cancel" onClick={() => setPendingDay(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

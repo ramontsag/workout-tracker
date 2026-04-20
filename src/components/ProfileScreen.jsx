@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { getProfile, signOut, saveWeeklyTarget, submitFeedback } from '../supabase'
 
-export default function ProfileScreen({ user, totalWorkouts, onBack, onEditProgram, onProgress, onArchives }) {
+export default function ProfileScreen({ user, totalWorkouts, totalActivities, onBack, onEditProgram, onProgress, onArchives }) {
   const [profile,        setProfile]       = useState(null)
   const [signingOut,     setSigningOut]    = useState(false)
   const [weeklyTarget,   setWeeklyTarget]  = useState(4)
@@ -83,6 +83,10 @@ export default function ProfileScreen({ user, totalWorkouts, onBack, onEditProgr
           <div className="stat-card">
             <div className="stat-value">{totalWorkouts ?? '—'}</div>
             <div className="stat-label">Workouts</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{totalActivities ?? '—'}</div>
+            <div className="stat-label">Activities</div>
           </div>
         </div>
 
