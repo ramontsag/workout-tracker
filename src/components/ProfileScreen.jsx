@@ -14,7 +14,7 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
   useEffect(() => {
     getProfile().then(p => {
       setProfile(p)
-      if (p?.weekly_target) setWeeklyTarget(p.weekly_target)
+      if (p?.weekly_target != null) setWeeklyTarget(p.weekly_target)
     }).catch(() => {})
   }, [user?.id])
 
