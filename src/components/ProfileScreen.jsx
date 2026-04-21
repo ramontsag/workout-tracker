@@ -113,8 +113,8 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
           <button className="profile-action-btn" style={{ marginTop: 8 }} onClick={onArchives}>
             <span className="profile-action-icon">🗂️</span>
             <span className="profile-action-text">
-              <span className="profile-action-title">Archives</span>
-              <span className="profile-action-sub">Saved workout templates</span>
+              <span className="profile-action-title">Saved Workouts</span>
+              <span className="profile-action-sub">Your saved workout plans</span>
             </span>
             <span className="profile-action-chevron">›</span>
           </button>

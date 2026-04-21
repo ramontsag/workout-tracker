@@ -1558,27 +1558,35 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 .timer-toggle--on { opacity: 1; }
 
-/* ── Archive (WorkoutDay post-save) ──────────────── */
-.archive-trigger-btn {
-  display: block;
-  width: 100%;
-  margin-top: 10px;
-  padding: 10px;
-  background: none;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-sm);
+/* Save workout button in workout header */
+.save-workout-btn {
+  background: var(--surface2);
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
   color: var(--text-muted);
-  font-size: 13px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  padding: 4px 10px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: color 0.15s;
 }
-.archive-trigger-btn:active { border-color: var(--accent); color: var(--accent); }
+.save-workout-btn:active { color: var(--accent); }
 
+/* ── Archive (WorkoutDay save form) ─────────────── */
 .archive-form {
   margin-top: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.archive-form-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
 }
 .archive-form-actions {
   display: flex;

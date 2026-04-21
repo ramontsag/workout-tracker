@@ -53,7 +53,7 @@ export default function ArchivesScreen({ user, program, onBack, onProgramUpdated
       <header className="sub-header">
         <button className="back-btn" onClick={onBack}>←</button>
         <div className="sub-header__info">
-          <div className="sub-header__title">Archives</div>
+          <div className="sub-header__title">Saved Workouts</div>
         </div>
       </header>
 
@@ -66,7 +66,7 @@ export default function ArchivesScreen({ user, program, onBack, onProgramUpdated
         )}
         {!loading && !error && templates.length === 0 && (
           <div className="state-msg state-msg--empty">
-            No archived workouts yet — complete a workout and tap "Archive this workout"
+            No saved workouts yet — open a workout and tap "Save"
           </div>
         )}
 

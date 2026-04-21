@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { getLastSession, saveWorkout, getPreviousSessionVolume, saveTemplate, getBestE1RMs } from '../supabase'
 
 function fmt(val) {
@@ -210,11 +210,10 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
   const [timerEnabled, setTimerEnabled] = useState(true)
   const restSeconds = day.rest_seconds ?? 90
 
-  // archive state — shown after a workout is saved
+  // save-workout state
   const [archiveStep,  setArchiveStep]  = useState(null)  // null | 'naming' | 'saving' | 'done' | 'limit'
   const [archiveName,  setArchiveName]  = useState('')
   const [archiveError, setArchiveError] = useState('')
-  const backTimerRef = useRef(null)
 
   // PR tracking — bestE1RMs: historical best per exercise from DB
   // prFlags: { [exName]: setIdx } — which set in current session is a PR
@@ -242,10 +241,6 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
       return next
     })
   }, [lastSession])
-
-  useEffect(() => {
-    return () => clearTimeout(backTimerRef.current)
-  }, [])
 
   // Load historical best e1RMs for all exercises on this day
   useEffect(() => {
@@ -335,7 +330,6 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
       }
       setVolumeMsg(msg)
       setStatus('saved')
-      backTimerRef.current = setTimeout(onBack, msg ? 2800 : 1400)
     } catch (e) {
       setErrMsg(e.message || 'Failed to save — please try again.')
       setStatus('idle')
@@ -343,7 +337,6 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
   }
 
   const handleArchiveTrigger = () => {
-    clearTimeout(backTimerRef.current)
     setArchiveName(day.name + (day.focus ? ` — ${day.focus}` : ''))
     setArchiveStep('naming')
   }
@@ -400,6 +393,14 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
           >
             ⏱
           </button>
+          <button
+            className="save-workout-btn"
+            onClick={handleArchiveTrigger}
+            title="Save workout as template"
+            aria-label="Save workout"
+          >
+            Save
+          </button>
         </header>
 
         {timerActive && (
@@ -454,14 +455,9 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
           <div className="volume-msg">{volumeMsg}</div>
         )}
 
-        {status === 'saved' && !archiveStep && (
-          <button className="archive-trigger-btn" onClick={handleArchiveTrigger}>
-            Archive this workout
-          </button>
-        )}
-
-        {status === 'saved' && archiveStep === 'naming' && (
+        {archiveStep === 'naming' && (
           <div className="archive-form">
+            <div className="archive-form-label">Save workout as template</div>
             <input
               className="field-input"
               placeholder="Template name…"
@@ -478,17 +474,17 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
           </div>
         )}
 
-        {status === 'saved' && archiveStep === 'saving' && (
-          <div className="archive-msg">Archiving…</div>
+        {archiveStep === 'saving' && (
+          <div className="archive-msg">Saving…</div>
         )}
 
-        {status === 'saved' && archiveStep === 'done' && (
-          <div className="archive-msg archive-msg--done">Archived!</div>
+        {archiveStep === 'done' && (
+          <div className="archive-msg archive-msg--done">Saved!</div>
         )}
 
-        {status === 'saved' && archiveStep === 'limit' && (
+        {archiveStep === 'limit' && (
           <div className="archive-msg archive-msg--warn">
-            Archive limit reached (10/10) — delete one from Archives first.
+            Saved workout limit reached (10/10) — delete one from Saved Workouts first.
           </div>
         )}
 
