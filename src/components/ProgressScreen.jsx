@@ -3,6 +3,7 @@ import {
   logBodyWeight, getBodyWeightLogs,
   getExerciseNames, getVolumeHistory,
 } from '../supabase'
+import { displayWeight, parseInputWeight, unitLabel, kgToLbs } from '../utils/units'
 
 function getToday() {
   const d = new Date()
@@ -14,11 +15,12 @@ function fmtDate(iso) {
 }
 
 // ── Weight line graph ─────────────────────────────────────────
-function WeightGraph({ logs }) {
+// Weights stored in kg; convert for display based on user's unit preference.
+function WeightGraph({ logs, unit }) {
   if (!logs || logs.length < 2) return null
 
   const data    = [...logs].reverse()
-  const weights = data.map(l => Number(l.weight_kg))
+  const weights = data.map(l => unit === 'lbs' ? kgToLbs(Number(l.weight_kg)) : Number(l.weight_kg))
   const rawMin  = Math.min(...weights)
   const rawMax  = Math.max(...weights)
   const pad     = (rawMax - rawMin) * 0.2 || 0.5
@@ -34,7 +36,7 @@ function WeightGraph({ logs }) {
   const toX = i => PL + (i / (data.length - 1)) * plotW
   const toY = v => PT + (1 - (v - yMin) / range) * plotH
 
-  const pts      = data.map((l, i) => ({ x: toX(i), y: toY(Number(l.weight_kg)), iso: l.logged_at }))
+  const pts      = data.map((l, i) => ({ x: toX(i), y: toY(weights[i]), iso: l.logged_at }))
   const polyline = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
   const guides   = [rawMax, (rawMin + rawMax) / 2, rawMin]
   const midIdx   = Math.floor((data.length - 1) / 2)
@@ -96,7 +98,9 @@ function Sparkline({ values, color = 'var(--accent)' }) {
 }
 
 // ── Main component ────────────────────────────────────────────
-export default function ProgressScreen({ user, onBack }) {
+export default function ProgressScreen({ user, profile, onBack }) {
+  const unit  = profile?.weight_unit || 'kg'
+  const label = unitLabel(unit)
   const [activeTab, setActiveTab] = useState('weight')
 
   // ── Weight state ────────────────────────────────────────
@@ -135,7 +139,7 @@ export default function ProgressScreen({ user, onBack }) {
   }, [selectedExercise, user?.id])
 
   const handleLogWeight = async () => {
-    const kg = parseFloat(weightInput)
+    const kg = parseInputWeight(weightInput, unit)
     if (isNaN(kg) || kg <= 0) { setWeightError('Enter a valid weight'); return }
     setWeightSaving(true)
     setWeightError('')
@@ -157,6 +161,8 @@ export default function ProgressScreen({ user, onBack }) {
     }
   }
 
+  // Volume sparkline values — raw kg·reps numbers. The chart is relative so
+  // unit conversion here would only change the y-axis scale, not shape.
   const volumeSparkValues = [...volumeHistory].reverse().map(s => s.totalVolume)
 
   return (
@@ -191,7 +197,7 @@ export default function ProgressScreen({ user, onBack }) {
           <>
             {weightLogs.length >= 2 ? (
               <div className="progress-graph-wrap">
-                <WeightGraph logs={weightLogs} />
+                <WeightGraph logs={weightLogs} unit={unit} />
               </div>
             ) : (
               <div className="state-msg state-msg--empty">
@@ -212,13 +218,13 @@ export default function ProgressScreen({ user, onBack }) {
               <div className="weight-form" style={{ marginTop: 10 }}>
                 <div className="weight-form-row">
                   <div className="weight-form-field">
-                    <label className="field-label">Weight (kg)</label>
+                    <label className="field-label">Weight ({label})</label>
                     <input
                       className="field-input"
                       type="number"
                       inputMode="decimal"
                       step="0.1"
-                      placeholder="e.g. 82.5"
+                      placeholder={unit === 'lbs' ? 'e.g. 182' : 'e.g. 82.5'}
                       value={weightInput}
                       onChange={e => { setWeightInput(e.target.value); setWeightError('') }}
                       onKeyDown={e => e.key === 'Enter' && handleLogWeight()}
@@ -253,7 +259,7 @@ export default function ProgressScreen({ user, onBack }) {
                 {weightLogs.slice(0, 12).map(entry => (
                   <div key={entry.id} className="weight-history-item">
                     <span className="weight-history-date">{fmtDate(entry.logged_at)}</span>
-                    <span className="weight-history-val">{Number(entry.weight_kg).toFixed(1)} kg</span>
+                    <span className="weight-history-val">{displayWeight(Number(entry.weight_kg), unit)} {label}</span>
                   </div>
                 ))}
               </div>
@@ -294,14 +300,17 @@ export default function ProgressScreen({ user, onBack }) {
                     )}
                     {volumeHistory.length > 0 ? (
                       <div className="weight-history-list">
-                        {volumeHistory.map(s => (
-                          <div key={s.workoutId} className="weight-history-item">
-                            <span className="weight-history-date">{fmtDate(s.date)}</span>
-                            <span className="weight-history-val">
-                              {Math.round(s.totalVolume).toLocaleString()} kg·reps
-                            </span>
-                          </div>
-                        ))}
+                        {volumeHistory.map(s => {
+                          const vol = unit === 'lbs' ? kgToLbs(s.totalVolume) : s.totalVolume
+                          return (
+                            <div key={s.workoutId} className="weight-history-item">
+                              <span className="weight-history-date">{fmtDate(s.date)}</span>
+                              <span className="weight-history-val">
+                                {Math.round(vol).toLocaleString()} {label}·reps
+                              </span>
+                            </div>
+                          )
+                        })}
                       </div>
                     ) : (
                       <div className="state-msg state-msg--empty">No sessions logged yet</div>

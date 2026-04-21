@@ -1,25 +1,31 @@
 import React, { useState, useEffect } from 'react'
-import { getLastSession, saveWorkout, getPreviousSessionVolume, saveTemplate, getBestE1RMs } from '../supabase'
+import { getLastSession, saveWorkout, getPreviousSessionVolume, saveTemplate, getExerciseBests } from '../supabase'
+import { displayWeight, parseInputWeight, unitLabel } from '../utils/units'
 
 function fmt(val) {
   return val === 0 || val === '0' ? '—' : val
 }
 
-function calcSessionVolume(sets) {
+// Volume summed over working sets only, in kg, from the current session state.
+// Caller passes unit so lbs input strings get converted before multiplying.
+function calcSessionVolume(sets, unit) {
   return Object.values(sets).flat().reduce((sum, s) => {
-    const w = parseFloat(s.weight)
+    if (s.is_warmup) return sum
+    const w = parseInputWeight(s.weight, unit)
     const r = parseInt(s.reps)
     if (isNaN(w) || isNaN(r)) return sum
     return sum + w * r
   }, 0)
 }
 
-function buildVolumeMsg(currentVol, prev) {
-  if (currentVol === 0) return null
+// Both inputs are volumes in kg·reps. Comparison is unit-agnostic since it's
+// a percentage, so there's no display conversion here.
+function buildVolumeMsg(currentVolKg, prev) {
+  if (currentVolKg === 0) return null
   if (!prev || prev.volume === 0) {
     return "First session logged for this day — this is your baseline."
   }
-  const pct = Math.round(((currentVol - prev.volume) / prev.volume) * 100)
+  const pct = Math.round(((currentVolKg - prev.volume) / prev.volume) * 100)
   const prevDay = new Date(prev.date).toLocaleDateString('en-US', { weekday: 'long' })
   if (pct > 0)  return `You pushed ${pct}% more volume than last ${prevDay} — keep going.`
   if (pct < 0)  return `Volume was ${Math.abs(pct)}% lighter than last ${prevDay} — recovery days count too.`
@@ -66,13 +72,17 @@ function RestTimer({ total, onDismiss }) {
 }
 
 // ── Progressive overload indicator ───────────────────────────
-function progressIndicator(sets, lastSets) {
+// Warmup sets are excluded on both sides so a heavier warmup can't mask
+// a lighter real session and vice versa.
+function progressIndicator(sets, lastSets, unit) {
   if (!lastSets || lastSets.length === 0) return null
   const currentVol = sets.reduce((sum, s) => {
-    const w = parseFloat(s.weight); const r = parseInt(s.reps)
+    if (s.is_warmup) return sum
+    const w = parseInputWeight(s.weight, unit); const r = parseInt(s.reps)
     return isNaN(w) || isNaN(r) ? sum : sum + w * r
   }, 0)
   const lastVol = lastSets.reduce((sum, s) => {
+    if (s.is_warmup) return sum
     const w = parseFloat(s.weight_kg); const r = parseInt(s.reps)
     return isNaN(w) || isNaN(r) ? sum : sum + w * r
   }, 0)
@@ -82,12 +92,56 @@ function progressIndicator(sets, lastSets) {
   return { label: '→', cls: 'ex-progress--same' }
 }
 
+// ── PR popover ────────────────────────────────────────────────
+// Anchored to the PR badge. `info` has: kind ('weight'|'reps'|'e1rm'),
+// current, previous (in kg or reps). `unit` formats weights.
+function PRPopover({ info, unit, onDismiss }) {
+  if (!info) return null
+  const label = unitLabel(unit)
+  let icon, line1, line2
+  if (info.kind === 'weight') {
+    icon  = '🏆'
+    line1 = 'New heaviest weight'
+    line2 = info.previous > 0
+      ? `Prev best: ${displayWeight(info.previous, unit)} ${label}`
+      : 'First recorded weight for this lift'
+  } else if (info.kind === 'reps') {
+    icon  = '🔥'
+    line1 = `New rep PR at ${displayWeight(info.currentWeightKg, unit)} ${label}`
+    line2 = `Prev best at this weight: ${info.previous} reps`
+  } else {
+    icon  = '📈'
+    line1 = 'New estimated 1RM'
+    line2 = info.previous > 0
+      ? `Prev best ≈ ${displayWeight(info.previous, unit)} ${label}`
+      : 'First recorded e1RM for this lift'
+  }
+  return (
+    <div className="pr-popover" onClick={e => { e.stopPropagation(); onDismiss() }}>
+      <span className="pr-popover__icon">{icon}</span>
+      <div className="pr-popover__text">
+        <div className="pr-popover__line1">{line1}</div>
+        <div className="pr-popover__line2">{line2}</div>
+      </div>
+    </div>
+  )
+}
+
 // ── Exercise item card (weight + reps per set) ────────────────
-function ExerciseCard({ exercise, sets, lastSets, prSetIdx, onUpdate, onConfirm, onAdd, onRemove, onHistory }) {
-  const prog = progressIndicator(sets, lastSets)
+function ExerciseCard({
+  exercise, sets, lastSets, prInfo, unit, intensityMode,
+  onUpdate, onConfirm, onAdd, onRemove, onHistory, onToggleWarmup,
+}) {
+  const prog = progressIndicator(sets, lastSets, unit)
+  const label = unitLabel(unit)
   const lastSummary = lastSets.length > 0
-    ? lastSets.map(s => `${fmt(s.weight_kg)}kg×${fmt(s.reps)}`).join(' · ')
+    ? lastSets
+        .filter(s => !s.is_warmup)
+        .map(s => `${fmt(displayWeight(s.weight_kg, unit))}${label}×${fmt(s.reps)}`)
+        .join(' · ')
     : null
+
+  const [prOpenIdx, setPrOpenIdx] = useState(null)
 
   return (
     <div className="ex-card">
@@ -109,16 +163,19 @@ function ExerciseCard({ exercise, sets, lastSets, prSetIdx, onUpdate, onConfirm,
       <div className="sets-list">
         {sets.map((set, idx) => {
           const prev = lastSets[idx]
+          const isPRSet = prInfo && prInfo.setIdx === idx
+          const showIntensity = intensityMode !== 'off' && !set.is_warmup
+          const intensityField = intensityMode === 'rpe' ? 'rpe' : 'rir'
           return (
-            <React.Fragment key={idx}>
-              <div className={`set-row${set.done ? ' set-row--done' : ''}`}>
-                <span className="set-num">{idx + 1}</span>
+            <div key={idx} className="set-item">
+              <div className={`set-row${set.done ? ' set-row--done' : ''}${set.is_warmup ? ' set-row--warmup' : ''}`}>
+                <span className="set-num">{set.is_warmup ? 'W' : idx + 1}</span>
                 <div className="set-input-group">
                   <input
                     className="set-input"
                     type="number"
                     inputMode="decimal"
-                    placeholder="KG"
+                    placeholder={label.toUpperCase()}
                     value={set.weight}
                     onChange={e => onUpdate(idx, 'weight', e.target.value)}
                   />
@@ -131,8 +188,31 @@ function ExerciseCard({ exercise, sets, lastSets, prSetIdx, onUpdate, onConfirm,
                     value={set.reps}
                     onChange={e => onUpdate(idx, 'reps', e.target.value)}
                   />
+                  {showIntensity && (
+                    <input
+                      className="set-input intensity-input"
+                      type="number"
+                      inputMode="decimal"
+                      step="0.5"
+                      placeholder={intensityField.toUpperCase()}
+                      value={set[intensityField] ?? ''}
+                      onChange={e => onUpdate(idx, intensityField, e.target.value)}
+                    />
+                  )}
                 </div>
-                {idx === prSetIdx && <span className="set-pr-badge">PR</span>}
+                <button
+                  className={`set-warmup-chip${set.is_warmup ? ' set-warmup-chip--on' : ''}`}
+                  onClick={() => onToggleWarmup(idx)}
+                  title={set.is_warmup ? 'Warmup — tap to unmark' : 'Mark as warmup'}
+                  aria-label="Toggle warmup"
+                >W</button>
+                {isPRSet && (
+                  <button
+                    className="set-pr-badge"
+                    onClick={() => setPrOpenIdx(prOpenIdx === idx ? null : idx)}
+                    title="Personal record"
+                  >PR</button>
+                )}
                 <button
                   className={`set-tick${set.done ? ' set-tick--done' : ''}`}
                   onClick={() => onConfirm(idx)}
@@ -142,12 +222,16 @@ function ExerciseCard({ exercise, sets, lastSets, prSetIdx, onUpdate, onConfirm,
                   <button className="set-remove" onClick={() => onRemove(idx)}>×</button>
                 )}
               </div>
+              {isPRSet && prOpenIdx === idx && (
+                <PRPopover info={prInfo} unit={unit} onDismiss={() => setPrOpenIdx(null)} />
+              )}
               {prev && (prev.weight_kg || prev.reps) && (
                 <div className="set-prev">
-                  {fmt(prev.weight_kg)}kg × {fmt(prev.reps)}
+                  {fmt(displayWeight(prev.weight_kg, unit))}{label} × {fmt(prev.reps)}
+                  {prev.is_warmup && <span className="set-prev-warmup"> (warmup)</span>}
                 </div>
               )}
-            </React.Fragment>
+            </div>
           )
         })}
       </div>
@@ -184,16 +268,18 @@ function ActivityCard({ item, log, onToggle, onNotes }) {
 }
 
 // ── Main component ────────────────────────────────────────────
-export default function WorkoutDay({ day, userId, onBack, onHistory }) {
+export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) {
   const exerciseItems = day.exercises.filter(e => e.item_type !== 'activity')
   const activityItems = day.exercises.filter(e => e.item_type === 'activity')
 
+  const unit          = profile?.weight_unit    || 'kg'
+  const intensityMode = profile?.intensity_mode || 'off'
+
+  const makeEmptySet = () => ({ weight: '', reps: '', done: false, is_warmup: false, rir: '', rpe: '' })
+
   const [sets, setSets] = useState(() =>
     Object.fromEntries(
-      exerciseItems.map(ex => [ex.name, [
-        { weight: '', reps: '', done: false },
-        { weight: '', reps: '', done: false },
-      ]])
+      exerciseItems.map(ex => [ex.name, [makeEmptySet(), makeEmptySet()]])
     )
   )
 
@@ -215,10 +301,12 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
   const [archiveName,  setArchiveName]  = useState('')
   const [archiveError, setArchiveError] = useState('')
 
-  // PR tracking — bestE1RMs: historical best per exercise from DB
-  // prFlags: { [exName]: setIdx } — which set in current session is a PR
-  const [bestE1RMs, setBestE1RMs] = useState({})
-  const [prFlags,   setPrFlags]   = useState({})
+  // PR tracking — exerciseBests: historical bests per exercise from DB
+  //   { [name]: { bestE1RM, bestWeight, maxRepsAtWeight: {kg->reps} } }
+  // prFlags: { [exName]: { setIdx, kind, current, previous, currentWeightKg } }
+  //   kind priority: 'weight' > 'reps' > 'e1rm' (rarest/most motivating first)
+  const [exerciseBests, setExerciseBests] = useState({})
+  const [prFlags,       setPrFlags]       = useState({})
 
   useEffect(() => {
     getLastSession(day.id).then(setLastSession).catch(() => {})
@@ -235,38 +323,72 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
         const prevCount = lastSession.sets.filter(s => s.exercise_name === exName).length
         const count = prevCount > 0 ? prevCount : 2
         if (count !== currentSets.length) {
-          next[exName] = Array.from({ length: count }, () => ({ weight: '', reps: '', done: false }))
+          next[exName] = Array.from({ length: count }, () => makeEmptySet())
         }
       }
       return next
     })
   }, [lastSession])
 
-  // Load historical best e1RMs for all exercises on this day
+  // Load historical PR stats for all exercises on this day
   useEffect(() => {
     const names = exerciseItems.map(e => e.name)
     if (!names.length || !userId) return
-    getBestE1RMs(names, userId).then(setBestE1RMs).catch(() => {})
+    getExerciseBests(names, userId).then(setExerciseBests).catch(() => {})
   }, [day.id]) // eslint-disable-line
 
-  // Recompute PR flags whenever sets change
+  // Recompute PR flags whenever sets change.
+  // Checks each non-warmup set against three record types in priority order:
+  //   weight PR (heaviest ever) > rep PR (most reps at this weight) > e1RM PR
+  // Only the highest-priority hit on the best-qualifying set is surfaced.
   useEffect(() => {
     const newFlags = {}
     for (const [exName, exSets] of Object.entries(sets)) {
-      const historical = bestE1RMs[exName] ?? 0
-      let bestE1rm = 0
-      let bestIdx  = -1
+      const bests = exerciseBests[exName] || { bestE1RM: 0, bestWeight: 0, maxRepsAtWeight: {} }
+      let winner = null  // { setIdx, kind, priority, score, previous, currentWeightKg }
       exSets.forEach((set, idx) => {
-        const w = parseFloat(set.weight)
-        const r = parseInt(set.reps)
-        if (isNaN(w) || isNaN(r) || w <= 0 || r <= 0) return
-        const e1rm = w * (1 + r / 30)
-        if (e1rm > bestE1rm) { bestE1rm = e1rm; bestIdx = idx }
+        if (set.is_warmup) return
+        const wKg = parseInputWeight(set.weight, unit)
+        const r   = parseInt(set.reps)
+        if (isNaN(wKg) || isNaN(r) || wKg <= 0 || r <= 0) return
+
+        // Weight PR (priority 0, best/highest)
+        if (wKg > (bests.bestWeight || 0)) {
+          const candidate = { setIdx: idx, kind: 'weight', priority: 0, score: wKg,
+                              previous: bests.bestWeight || 0, currentWeightKg: wKg }
+          if (!winner || candidate.priority < winner.priority ||
+              (candidate.priority === winner.priority && candidate.score > winner.score)) {
+            winner = candidate
+            return
+          }
+        }
+        // Rep PR at this weight (priority 1)
+        const key = wKg.toFixed(1)
+        const prevRepsAtWeight = bests.maxRepsAtWeight?.[key] || 0
+        if (r > prevRepsAtWeight) {
+          const candidate = { setIdx: idx, kind: 'reps', priority: 1, score: r,
+                              previous: prevRepsAtWeight, currentWeightKg: wKg }
+          if (!winner || candidate.priority < winner.priority ||
+              (candidate.priority === winner.priority && candidate.score > winner.score)) {
+            winner = candidate
+            // fall through — a higher-priority weight PR could still show up
+          }
+        }
+        // e1RM PR (priority 2)
+        const e1rm = wKg * (1 + r / 30)
+        if (e1rm > (bests.bestE1RM || 0)) {
+          const candidate = { setIdx: idx, kind: 'e1rm', priority: 2, score: e1rm,
+                              previous: bests.bestE1RM || 0, currentWeightKg: wKg }
+          if (!winner || candidate.priority < winner.priority ||
+              (candidate.priority === winner.priority && candidate.score > winner.score)) {
+            winner = candidate
+          }
+        }
       })
-      if (bestIdx >= 0 && bestE1rm > historical) newFlags[exName] = bestIdx
+      if (winner) newFlags[exName] = winner
     }
     setPrFlags(newFlags)
-  }, [sets, bestE1RMs])
+  }, [sets, exerciseBests, unit])
 
   // ── Exercise helpers ────────────────────────────────────
   const updateSet = (exName, idx, field, value) => {
@@ -288,7 +410,13 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
   }
 
   const addSet = (exName) =>
-    setSets(prev => ({ ...prev, [exName]: [...prev[exName], { weight: '', reps: '', done: false }] }))
+    setSets(prev => ({ ...prev, [exName]: [...prev[exName], makeEmptySet()] }))
+
+  const toggleWarmup = (exName, idx) =>
+    setSets(prev => ({
+      ...prev,
+      [exName]: prev[exName].map((s, i) => i === idx ? { ...s, is_warmup: !s.is_warmup } : s),
+    }))
 
   const removeSet = (exName, idx) =>
     setSets(prev => ({ ...prev, [exName]: prev[exName].filter((_, i) => i !== idx) }))
@@ -315,16 +443,30 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
     setStatus('saving')
     setErrMsg('')
     try {
+      // Convert user-unit weights to kg before persisting.
+      // Preserves empty strings → NaN → saved as 0 in supabase.js.
+      const setsForSave = Object.fromEntries(
+        Object.entries(sets).map(([name, arr]) => [
+          name,
+          arr.map(s => ({
+            weight_kg: parseInputWeight(s.weight, unit),
+            reps:      s.reps,
+            is_warmup: !!s.is_warmup,
+            rir:       s.rir,
+            rpe:       s.rpe,
+          })),
+        ])
+      )
       const workout = await saveWorkout(
         day.id,
         `${day.name}${day.focus ? ` — ${day.focus}` : ''}`,
-        sets, activityLogs, userId
+        setsForSave, activityLogs, userId
       )
-      const currentVol = calcSessionVolume(sets)
+      const currentVolKg = calcSessionVolume(sets, unit)
       let msg = ''
       try {
         const prev = await getPreviousSessionVolume(day.id, workout.id)
-        msg = buildVolumeMsg(currentVol, prev) || ''
+        msg = buildVolumeMsg(currentVolKg, prev) || ''
       } catch {
         // non-fatal — skip the message if the fetch fails
       }
@@ -429,12 +571,15 @@ export default function WorkoutDay({ day, userId, onBack, onHistory }) {
               exercise={item}
               sets={sets[item.name]}
               lastSets={getLastSets(item.name)}
-              prSetIdx={prFlags[item.name]}
+              prInfo={prFlags[item.name]}
+              unit={unit}
+              intensityMode={intensityMode}
               onUpdate={(idx, field, val) => updateSet(item.name, idx, field, val)}
               onConfirm={idx => confirmSet(item.name, idx)}
               onAdd={() => addSet(item.name)}
               onRemove={idx => removeSet(item.name, idx)}
               onHistory={() => onHistory(item.name)}
+              onToggleWarmup={idx => toggleWarmup(item.name, idx)}
             />
           )
         )}

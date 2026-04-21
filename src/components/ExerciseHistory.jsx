@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { getExerciseHistory } from '../supabase'
+import { displayWeight, unitLabel, kgToLbs } from '../utils/units'
 
 function fmt(val) { return val === 0 ? '—' : val }
 
-export default function ExerciseHistory({ exercise, onBack }) {
+export default function ExerciseHistory({ exercise, profile, onBack }) {
+  const unit  = profile?.weight_unit || 'kg'
+  const label = unitLabel(unit)
+
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -15,8 +19,11 @@ export default function ExerciseHistory({ exercise, onBack }) {
       .finally(() => setLoading(false))
   }, [exercise])
 
-  const volume = (sets) =>
-    sets.reduce((acc, s) => acc + (s.weight_kg || 0) * (s.reps || 0), 0)
+  // Sum in kg, excluding warmup sets from the headline volume figure.
+  const volumeKg = (sets) =>
+    sets
+      .filter(s => !s.is_warmup)
+      .reduce((acc, s) => acc + (s.weight_kg || 0) * (s.reps || 0), 0)
 
   return (
     <div className="screen">
@@ -44,7 +51,8 @@ export default function ExerciseHistory({ exercise, onBack }) {
                 weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
               })
             : 'Unknown date'
-          const vol = volume(session.sets)
+          const volKg = volumeKg(session.sets)
+          const volDisplay = unit === 'lbs' ? kgToLbs(volKg) : volKg
 
           return (
             <div key={session.workoutId || i} className="history-card">
@@ -52,17 +60,19 @@ export default function ExerciseHistory({ exercise, onBack }) {
                 <span className="history-card__date">{date}</span>
                 <span className="history-card__day">{session.dayName}</span>
               </div>
-              {vol > 0 && (
+              {volKg > 0 && (
                 <div className="history-card__volume">
-                  Volume: {vol.toLocaleString()} kg
+                  Volume: {Math.round(volDisplay).toLocaleString()} {label}
                 </div>
               )}
               <div className="history-sets">
                 {session.sets.map((s, idx) => (
-                  <div key={idx} className="history-set-row">
-                    <span className="history-set-num">Set {s.set_number}</span>
+                  <div key={idx} className={`history-set-row ${s.is_warmup ? 'history-set-row--warmup' : ''}`}>
+                    <span className="history-set-num">
+                      {s.is_warmup ? 'Warmup' : `Set ${s.set_number}`}
+                    </span>
                     <span className="history-set-vals">
-                      {fmt(s.weight_kg)} kg × {fmt(s.reps)} reps
+                      {s.weight_kg ? `${displayWeight(s.weight_kg, unit)} ${label}` : '—'} × {fmt(s.reps)} reps
                     </span>
                   </div>
                 ))}

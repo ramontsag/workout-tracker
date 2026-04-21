@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { saveProgram } from '../supabase'
+import React, { useState, useEffect } from 'react'
+import { saveProgram, getAllKnownExerciseNames } from '../supabase'
 import { DEFAULT_DAYS } from '../data/defaultProgram'
 
 // ─────────────────────────────────────────────────────────────
@@ -7,9 +7,21 @@ import { DEFAULT_DAYS } from '../data/defaultProgram'
 // ─────────────────────────────────────────────────────────────
 function DayCard({
   day, isOpen, onToggle, onChange,
-  newInput, onNewInputChange, onAddItem,
+  newInput, onNewInputChange, onAddItem, onAddItemWithName,
   onRemoveItem, onMoveItem, onToggleItemType, onUpdateTarget,
+  suggestions,
 }) {
+  const [showSuggest, setShowSuggest] = useState(false)
+
+  // Existing names on this day (case-insensitive) — exclude from autocomplete
+  const existingLower = new Set(day.exercises.map(e => (e.name || '').toLowerCase()))
+  const q = newInput.trim().toLowerCase()
+  const matches = q
+    ? suggestions
+        .filter(n => n.toLowerCase().includes(q) && !existingLower.has(n.toLowerCase()))
+        .slice(0, 6)
+    : []
+  const shouldShow = showSuggest && matches.length > 0
   const itemCount = day.exercises.length
   const exCount   = day.exercises.filter(e => e.item_type === 'exercise').length
   const actCount  = day.exercises.filter(e => e.item_type === 'activity').length
@@ -107,15 +119,34 @@ function DayCard({
           </div>
 
           {/* Add item row — defaults to Exercise */}
-          <div className="ex-add-row">
-            <input
-              className="field-input ex-add-input"
-              placeholder="Add item…"
-              value={newInput}
-              onChange={e => onNewInputChange(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onAddItem() } }}
-            />
-            <button className="ex-add-btn" onClick={onAddItem}>+</button>
+          <div className="ex-add-wrap">
+            <div className="ex-add-row">
+              <input
+                className="field-input ex-add-input"
+                placeholder="Add item…"
+                value={newInput}
+                onChange={e => { onNewInputChange(e.target.value); setShowSuggest(true) }}
+                onFocus={() => setShowSuggest(true)}
+                onBlur={() => setTimeout(() => setShowSuggest(false), 150)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onAddItem(); setShowSuggest(false) } }}
+              />
+              <button className="ex-add-btn" onClick={onAddItem}>+</button>
+            </div>
+            {shouldShow && (
+              <div className="autocomplete-list">
+                {matches.map(name => (
+                  <button
+                    key={name}
+                    type="button"
+                    className="autocomplete-item"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => { onAddItemWithName(name); setShowSuggest(false) }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
         </div>
@@ -141,6 +172,12 @@ export default function ProgramSetup({ userId, initialDays, isEditing, onComplet
   const [openIdx, setOpenIdx] = useState(-1)   // -1 = all collapsed
   const [saving,  setSaving]  = useState(false)
   const [error,   setError]   = useState('')
+  const [suggestions, setSuggestions] = useState([])
+
+  useEffect(() => {
+    if (!userId) return
+    getAllKnownExerciseNames(userId).then(setSuggestions).catch(() => {})
+  }, [userId])
 
   // ── Day helpers ───────────────────────────────────────────
   const updateDay = (i, field, val) =>
@@ -152,6 +189,17 @@ export default function ProgramSetup({ userId, initialDays, isEditing, onComplet
     if (!name) return
     setDays(prev => prev.map((d, idx) =>
       idx === i ? { ...d, exercises: [...d.exercises, { name, target: '', item_type: 'exercise' }] } : d
+    ))
+    setInputs(prev => prev.map((v, idx) => idx === i ? '' : v))
+  }
+
+  // Add from autocomplete — uses the suggested name directly, ignoring
+  // whatever partial text is in the input. Clears the input afterward.
+  const addItemWithName = (i, name) => {
+    const n = (name || '').trim()
+    if (!n) return
+    setDays(prev => prev.map((d, idx) =>
+      idx === i ? { ...d, exercises: [...d.exercises, { name: n, target: '', item_type: 'exercise' }] } : d
     ))
     setInputs(prev => prev.map((v, idx) => idx === i ? '' : v))
   }
@@ -240,10 +288,12 @@ export default function ProgramSetup({ userId, initialDays, isEditing, onComplet
             newInput={inputs[i] || ''}
             onNewInputChange={val => setInputs(prev => prev.map((v, idx) => idx === i ? val : v))}
             onAddItem={() => addItem(i)}
+            onAddItemWithName={name => addItemWithName(i, name)}
             onRemoveItem={itemIdx => removeItem(i, itemIdx)}
             onMoveItem={(itemIdx, dir) => moveItem(i, itemIdx, dir)}
             onToggleItemType={itemIdx => toggleItemType(i, itemIdx)}
             onUpdateTarget={(itemIdx, target) => updateTarget(i, itemIdx, target)}
+            suggestions={suggestions}
           />
         ))}
 

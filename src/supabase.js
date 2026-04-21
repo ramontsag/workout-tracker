@@ -287,7 +287,8 @@ export async function getLastSession(trainingDayId) {
 }
 
 // uid passed in from App state — no auth call needed
-// exerciseSets:  { [name]: [{ weight, reps }] }  — exercise items
+// exerciseSets:  { [name]: [{ weight_kg, reps, is_warmup, rir, rpe }] }
+//   weight_kg is already in kg (caller converts from user unit)
 // activityLogs:  { [name]: { checked, notes } }   — activity items
 export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activityLogs, uid) {
   if (!uid) throw new Error('Not authenticated')
@@ -312,9 +313,11 @@ export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activit
   // Exercise items — one row per set
   for (const [exerciseName, sets] of Object.entries(exerciseSets)) {
     sets.forEach((set, idx) => {
-      const w = parseFloat(set.weight)
+      const w = typeof set.weight_kg === 'number' ? set.weight_kg : parseFloat(set.weight_kg)
       const r = parseInt(set.reps)
       if (!isNaN(w) || !isNaN(r)) {
+        const rir = set.rir === '' || set.rir == null ? null : parseFloat(set.rir)
+        const rpe = set.rpe === '' || set.rpe == null ? null : parseFloat(set.rpe)
         rowsToInsert.push({
           user_id:       uid,
           workout_id:    workout.id,
@@ -324,6 +327,9 @@ export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activit
           reps:          isNaN(r) ? 0 : r,
           checked:       false,
           notes:         '',
+          is_warmup:     !!set.is_warmup,
+          rir:           isNaN(rir) ? null : rir,
+          rpe:           isNaN(rpe) ? null : rpe,
         })
       }
     })
@@ -439,6 +445,17 @@ export async function saveWeeklyTarget(target, uid) {
   if (error) throw new Error(`Save target failed: ${error.message}`)
 }
 
+// Generic settings updater. `fields` is a partial profile object, e.g.
+// { weight_unit: 'lbs' } or { intensity_mode: 'rir', weight_unit: 'kg' }.
+export async function saveSettings(fields, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { error } = await withTimeout(
+    supabase.from('profiles').update(fields).eq('id', uid),
+    5000, 'Save settings'
+  )
+  if (error) throw new Error(`Save settings failed: ${error.message}`)
+}
+
 // ── Stats ─────────────────────────────────────────────────────
 
 export async function getStats() {
@@ -477,16 +494,15 @@ export async function getPreviousSessionVolume(trainingDayId, excludeWorkoutId) 
   const { data: prevSets, error: setsErr } = await withTimeout(
     supabase
       .from('workout_sets')
-      .select('weight_kg, reps')
+      .select('weight_kg, reps, is_warmup')
       .eq('workout_id', sessions[0].id),
     5000, 'Load previous sets'
   )
   if (setsErr) return null
 
-  const volume = (prevSets || []).reduce(
-    (sum, s) => sum + (s.weight_kg || 0) * (s.reps || 0),
-    0
-  )
+  const volume = (prevSets || [])
+    .filter(s => !s.is_warmup)
+    .reduce((sum, s) => sum + (s.weight_kg || 0) * (s.reps || 0), 0)
   return { volume, date: sessions[0].completed_at }
 }
 
@@ -646,15 +662,20 @@ export async function applyTemplate(templateId, trainingDayId, uid) {
 
 // ── PR Tracking ───────────────────────────────────────────────
 
-// Returns the best e1RM (Epley: weight * (1 + reps/30)) ever recorded
-// for each of the given exercise names for this user.
-// Result: { [exerciseName]: bestE1RM }
-export async function getBestE1RMs(exerciseNames, uid) {
+// Returns per-exercise PR stats used to flag weight / rep / e1RM PRs.
+// Warmup sets and zeroes are excluded so they never count toward records.
+// Result shape:
+//   { [exerciseName]: {
+//       bestE1RM:        number,
+//       bestWeight:      number,
+//       maxRepsAtWeight: { [kgRounded]: maxReps }   // keyed by weight rounded to 1 decimal
+//   } }
+export async function getExerciseBests(exerciseNames, uid) {
   if (!uid || !exerciseNames.length) return {}
   const { data, error } = await withTimeout(
     supabase
       .from('workout_sets')
-      .select('exercise_name, weight_kg, reps')
+      .select('exercise_name, weight_kg, reps, is_warmup')
       .eq('user_id', uid)
       .in('exercise_name', exerciseNames)
       .gt('weight_kg', 0)
@@ -662,14 +683,22 @@ export async function getBestE1RMs(exerciseNames, uid) {
     5000, 'Load PR history'
   )
   if (error) throw new Error(`Load PR history failed: ${error.message}`)
-  const best = {}
+
+  const bests = {}
   for (const row of (data || [])) {
-    const e1rm = row.weight_kg * (1 + row.reps / 30)
-    if (!best[row.exercise_name] || e1rm > best[row.exercise_name]) {
-      best[row.exercise_name] = e1rm
-    }
+    if (row.is_warmup) continue
+    const name = row.exercise_name
+    const w = Number(row.weight_kg)
+    const r = Number(row.reps)
+    const e1rm = w * (1 + r / 30)
+    if (!bests[name]) bests[name] = { bestE1RM: 0, bestWeight: 0, maxRepsAtWeight: {} }
+    const b = bests[name]
+    if (e1rm > b.bestE1RM) b.bestE1RM = e1rm
+    if (w > b.bestWeight)  b.bestWeight = w
+    const key = w.toFixed(1)
+    if (!b.maxRepsAtWeight[key] || r > b.maxRepsAtWeight[key]) b.maxRepsAtWeight[key] = r
   }
-  return best
+  return bests
 }
 
 // ── Volume Stats ──────────────────────────────────────────────
@@ -692,14 +721,54 @@ export async function getExerciseNames(uid) {
   return (data || []).filter(r => seen.has(r.name) ? false : seen.add(r.name)).map(r => r.name)
 }
 
+// Returns the union of exercise names the user has ever defined in their
+// program OR logged in a past workout. Used by the autocomplete in
+// ProgramSetup so suggestions include lifts they've dropped from the
+// current program but still remember by name. Deduped case-insensitively,
+// preserving the first occurrence's casing.
+export async function getAllKnownExerciseNames(uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const [fromProgram, fromLogs] = await Promise.all([
+    withTimeout(
+      supabase
+        .from('exercises')
+        .select('name')
+        .eq('user_id', uid)
+        .eq('item_type', 'exercise'),
+      5000, 'Load program names'
+    ),
+    withTimeout(
+      supabase
+        .from('workout_sets')
+        .select('exercise_name')
+        .eq('user_id', uid),
+      5000, 'Load history names'
+    ),
+  ])
+  if (fromProgram.error) throw new Error(`Load names failed: ${fromProgram.error.message}`)
+  if (fromLogs.error)    throw new Error(`Load names failed: ${fromLogs.error.message}`)
+
+  const seen = new Map() // lowercase → original
+  for (const row of fromProgram.data || []) {
+    const name = (row.name || '').trim()
+    if (name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name)
+  }
+  for (const row of fromLogs.data || []) {
+    const name = (row.exercise_name || '').trim()
+    if (name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name)
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b))
+}
+
 // Returns volume per session for a given exercise, newest first.
-// Volume = sum(weight_kg * reps) across all sets in that workout.
+// Volume = sum(weight_kg * reps) across all working sets in that workout.
+// Warmup sets are excluded so the user's progress chart reflects real work.
 export async function getVolumeHistory(exerciseName, uid, limit = 10) {
   if (!uid) throw new Error('Not authenticated')
   const { data, error } = await withTimeout(
     supabase
       .from('workout_sets')
-      .select('weight_kg, reps, workout:workouts(id, completed_at, day_name)')
+      .select('weight_kg, reps, is_warmup, workout:workouts(id, completed_at, day_name)')
       .eq('exercise_name', exerciseName)
       .eq('user_id', uid)
       .order('workout_id', { ascending: false }),
@@ -707,9 +776,10 @@ export async function getVolumeHistory(exerciseName, uid, limit = 10) {
   )
   if (error) throw new Error(`Load volume failed: ${error.message}`)
 
-  // Group rows by workout, sum volume per session
+  // Group rows by workout, sum volume per session (excluding warmups)
   const byWorkout = {}
   for (const row of data || []) {
+    if (row.is_warmup) continue
     const wid = row.workout?.id
     if (!wid) continue
     if (!byWorkout[wid]) {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { getBodyWeightLogs, logBodyWeight, getWeeklyProgress } from '../supabase'
+import { displayWeight, parseInputWeight, unitLabel } from '../utils/units'
 
 const DAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
 const DAY_ABBREV = {
@@ -95,7 +96,9 @@ function weeklyMessage(completed, target, workouts, activities) {
 }
 
 // ── Main component ────────────────────────────────────────────
-export default function Home({ program, userId, onSelectDay, onProfile }) {
+export default function Home({ program, userId, profile, onSelectDay, onProfile }) {
+  const unit = profile?.weight_unit || 'kg'
+  const label = unitLabel(unit)
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' })
 
   const [lastWeight,     setLastWeight]     = useState(null)
@@ -117,7 +120,7 @@ export default function Home({ program, userId, onSelectDay, onProfile }) {
   }, [userId])
 
   const handleLogWeight = async () => {
-    const kg = parseFloat(weightInput)
+    const kg = parseInputWeight(weightInput, unit)
     if (isNaN(kg) || kg <= 0) { setError('Enter a valid weight'); return }
     setSaving(true)
     setError('')
@@ -199,7 +202,7 @@ export default function Home({ program, userId, onSelectDay, onProfile }) {
             <div className="weight-bar-label">Bodyweight</div>
             <span className="weight-bar-reading">
               {lastWeight
-                ? <>{Number(lastWeight.weight_kg).toFixed(1)} <span className="weight-bar-unit">kg</span> <span className="weight-bar-dot">·</span> {fmtDate(lastWeight.logged_at)}</>
+                ? <>{displayWeight(Number(lastWeight.weight_kg), unit)} <span className="weight-bar-unit">{label}</span> <span className="weight-bar-dot">·</span> {fmtDate(lastWeight.logged_at)}</>
                 : <span className="weight-bar-empty">No log yet</span>
               }
             </span>
@@ -220,7 +223,7 @@ export default function Home({ program, userId, onSelectDay, onProfile }) {
                 type="number"
                 inputMode="decimal"
                 step="0.1"
-                placeholder="kg"
+                placeholder={label}
                 value={weightInput}
                 onChange={e => { setWeightInput(e.target.value); setError('') }}
                 onKeyDown={e => e.key === 'Enter' && handleLogWeight()}

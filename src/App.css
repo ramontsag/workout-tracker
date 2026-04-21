@@ -1852,3 +1852,160 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   font-size: 15px;
   cursor: pointer;
 }
+
+/* ── Warmup chip on set row ───────────────────────── */
+.set-warmup-chip {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.set-warmup-chip--on {
+  background: var(--cyan-bg);
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.set-row--warmup .set-input { opacity: 0.55; font-style: italic; }
+.set-row--warmup .set-num   { color: var(--cyan); opacity: 0.8; }
+
+/* ── Intensity (RIR / RPE) input ──────────────────── */
+.intensity-input {
+  max-width: 52px;
+  flex: 0 0 52px;
+}
+.intensity-input::placeholder {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+/* ── Per-set prev warmup hint ─────────────────────── */
+.set-prev-warmup {
+  color: var(--text-muted);
+  font-style: italic;
+  margin-left: 2px;
+}
+
+/* ── PR popover (tap-to-reveal) ───────────────────── */
+.set-item { display: flex; flex-direction: column; gap: 2px; }
+.pr-popover {
+  margin: 4px 0 2px 30px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--surface3);
+  border: 1px solid #FFB800;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+.pr-popover__icon { font-size: 16px; line-height: 1.1; flex-shrink: 0; }
+.pr-popover__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pr-popover__line1 {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+.pr-popover__line2 {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Segmented control (Settings) ─────────────────── */
+.segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+.segmented-control--3 { grid-template-columns: 1fr 1fr 1fr; }
+.segmented-option {
+  padding: 10px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.segmented-option--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ── Settings blocks ──────────────────────────────── */
+.setting-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.setting-label {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.setting-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+/* ── Autocomplete (ProgramSetup) ──────────────────── */
+.ex-add-wrap { position: relative; }
+.autocomplete-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 48px;
+  z-index: 15;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.autocomplete-item {
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text);
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.15s;
+}
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item:active { background: var(--surface2); color: var(--accent); }
+
+/* ── Warmup row in history list ───────────────────── */
+.history-set-row--warmup {
+  opacity: 0.55;
+  font-style: italic;
+}
+.history-set-row--warmup .history-set-num { color: var(--cyan); }

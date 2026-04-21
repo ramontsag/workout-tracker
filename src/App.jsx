@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { supabase, getProgram, getStats } from './supabase'
+import { supabase, getProgram, getStats, getProfile } from './supabase'
 import AuthScreen      from './components/AuthScreen'
 import ProgramSetup    from './components/ProgramSetup'
 import Home            from './components/Home'
@@ -8,6 +8,7 @@ import ExerciseHistory from './components/ExerciseHistory'
 import ProfileScreen   from './components/ProfileScreen'
 import ProgressScreen  from './components/ProgressScreen'
 import ArchivesScreen  from './components/ArchivesScreen'
+import SettingsScreen  from './components/SettingsScreen'
 
 // Screens: loading → auth → setup → home
 //          home → workout → history → workout
@@ -21,6 +22,7 @@ export default function App() {
   const [activeExercise,  setActiveExercise] = useState(null)
   const [totalWorkouts,   setTotalWorkouts]  = useState(null)
   const [totalActivities, setTotalActivities] = useState(null)
+  const [profile,         setProfile]        = useState(null)
 
   const screenRef = useRef('loading')
   const go = (s) => { screenRef.current = s; setScreen(s) }
@@ -35,6 +37,13 @@ export default function App() {
       go('setup')
     }
   }, []) // eslint-disable-line
+
+  const loadProfile = useCallback(async () => {
+    try {
+      const p = await getProfile()
+      if (p) setProfile(p)
+    } catch {}
+  }, [])
 
   useEffect(() => {
     const fallback = setTimeout(() => {
@@ -51,6 +60,7 @@ export default function App() {
           if (session?.user) {
             setUser(session.user)
             await loadProgram()
+            loadProfile()
             getStats().then(s => { setTotalWorkouts(s.totalWorkouts); setTotalActivities(s.totalActivities) }).catch(() => {})
           } else go('auth')
 
@@ -61,19 +71,20 @@ export default function App() {
             // but we must not disrupt an active screen (e.g. mid-workout logging)
             if (screenRef.current === 'auth') {
               await loadProgram()
+              loadProfile()
               getStats().then(s => { setTotalWorkouts(s.totalWorkouts); setTotalActivities(s.totalActivities) }).catch(() => {})
             }
           }
 
         } else if (event === 'SIGNED_OUT') {
-          setUser(null); setProgram([]); setActiveDay(null); setTotalWorkouts(null); setTotalActivities(null)
+          setUser(null); setProgram([]); setActiveDay(null); setTotalWorkouts(null); setTotalActivities(null); setProfile(null)
           go('auth')
         }
       }
     )
 
     return () => { clearTimeout(fallback); subscription.unsubscribe() }
-  }, [loadProgram]) // eslint-disable-line
+  }, [loadProgram, loadProfile]) // eslint-disable-line
 
   // ── Render ────────────────────────────────────────────────────
 
@@ -104,6 +115,7 @@ export default function App() {
     return (
       <ExerciseHistory
         exercise={activeExercise}
+        profile={profile}
         onBack={() => go('workout')}
       />
     )
@@ -114,6 +126,7 @@ export default function App() {
       <WorkoutDay
         day={activeDay}
         userId={user?.id}
+        profile={profile}
         onBack={() => { setActiveDay(null); go('home') }}
         onHistory={exercise => { setActiveExercise(exercise); go('history') }}
       />
@@ -130,6 +143,7 @@ export default function App() {
         onEditProgram={() => go('setup')}
         onProgress={() => go('progress')}
         onArchives={() => go('archives')}
+        onSettings={() => go('settings')}
       />
     )
   }
@@ -138,6 +152,7 @@ export default function App() {
     return (
       <ProgressScreen
         user={user}
+        profile={profile}
         onBack={() => go('profile')}
       />
     )
@@ -154,10 +169,22 @@ export default function App() {
     )
   }
 
+  if (screen === 'settings') {
+    return (
+      <SettingsScreen
+        user={user}
+        profile={profile}
+        onBack={() => go('profile')}
+        onProfileUpdated={setProfile}
+      />
+    )
+  }
+
   return (
     <Home
       program={program}
       userId={user?.id}
+      profile={profile}
       onSelectDay={day => { setActiveDay(day); go('workout') }}
       onProfile={() => go('profile')}
     />
