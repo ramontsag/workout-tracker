@@ -357,6 +357,19 @@ export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activit
     return isNaN(n) ? null : n
   }
   for (const [activityName, log] of Object.entries(activityLogs)) {
+    const duration = numOrNull(log.duration_min)
+    const distance = numOrNull(log.distance_km)
+    const intensity = intOrNull(log.intensity)
+    const avgHr = intOrNull(log.avg_hr)
+    const cals = numOrNull(log.calories)
+    const rnds = intOrNull(log.rounds)
+    const elev = numOrNull(log.elevation_m)
+    const notes = log.notes || ''
+    // Skip completely-blank activities (day has it scheduled but user didn't log).
+    // Prevents Progress > Activities from counting empty rows as sessions.
+    const hasAnyData = !!log.checked || notes.length > 0 ||
+      [duration, distance, intensity, avgHr, cals, rnds, elev].some(v => v != null)
+    if (!hasAnyData) continue
     rowsToInsert.push({
       user_id:       uid,
       workout_id:    workout.id,
@@ -365,14 +378,14 @@ export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activit
       weight_kg:     0,
       reps:          0,
       checked:       !!log.checked,
-      notes:         log.notes || '',
-      duration_min:  numOrNull(log.duration_min),
-      distance_km:   numOrNull(log.distance_km),
-      intensity:     intOrNull(log.intensity),
-      avg_hr:        intOrNull(log.avg_hr),
-      calories:      numOrNull(log.calories),
-      rounds:        intOrNull(log.rounds),
-      elevation_m:   numOrNull(log.elevation_m),
+      notes,
+      duration_min:  duration,
+      distance_km:   distance,
+      intensity,
+      avg_hr:        avgHr,
+      calories:      cals,
+      rounds:        rnds,
+      elevation_m:   elev,
     })
   }
 
