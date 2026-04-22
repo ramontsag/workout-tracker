@@ -99,6 +99,22 @@ export const DEFAULT_DAYS = [
 // Kept for any legacy imports — alias to DEFAULT_DAYS
 export const DEFAULT_PROGRAM = DEFAULT_DAYS
 
+// Blank 7-day template. Used as the seed for every account other than the
+// owner, so new sign-ups start with an empty program to customise.
+export const EMPTY_DAYS = [
+  { name: 'Monday',    focus: '', color: '#64748b', exercises: [] },
+  { name: 'Tuesday',   focus: '', color: '#64748b', exercises: [] },
+  { name: 'Wednesday', focus: '', color: '#64748b', exercises: [] },
+  { name: 'Thursday',  focus: '', color: '#64748b', exercises: [] },
+  { name: 'Friday',    focus: '', color: '#64748b', exercises: [] },
+  { name: 'Saturday',  focus: '', color: '#64748b', exercises: [] },
+  { name: 'Sunday',    focus: '', color: '#64748b', exercises: [] },
+]
+
+// Only this email sees the owner's personal default program. Everyone else
+// (and any new sign-up) gets EMPTY_DAYS.
+export const OWNER_EMAIL = 'ramontsag28@gmail.com'
+
 // ── Shared color palette ──────────────────────────────────────
 export const DAY_COLORS = [
   '#f97316', // orange

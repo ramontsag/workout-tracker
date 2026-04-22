@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { saveProgram, getAllKnownExerciseNames } from '../supabase'
-import { DEFAULT_DAYS } from '../data/defaultProgram'
+import { DEFAULT_DAYS, EMPTY_DAYS, OWNER_EMAIL } from '../data/defaultProgram'
 import {
   CURATED_ACTIVITIES, FIELD_CATALOG, defaultFieldsFor, DEFAULT_ACTIVITY_FIELDS,
 } from '../data/commonActivities'
@@ -182,8 +182,12 @@ function DayCard({
 // ─────────────────────────────────────────────────────────────
 const WEEKDAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
 
-export default function ProgramSetup({ userId, initialDays, isEditing, onComplete, onBack }) {
-  const seed = (initialDays?.length > 0 ? initialDays : DEFAULT_DAYS)
+export default function ProgramSetup({ userId, userEmail, initialDays, isEditing, onComplete, onBack }) {
+  // Fresh accounts: owner gets the personal default, everyone else starts blank.
+  const fallback = (userEmail || '').toLowerCase() === OWNER_EMAIL.toLowerCase()
+    ? DEFAULT_DAYS
+    : EMPTY_DAYS
+  const seed = (initialDays?.length > 0 ? initialDays : fallback)
     .filter(d => WEEKDAYS.includes(d.name))
     .sort((a, b) => WEEKDAYS.indexOf(a.name) - WEEKDAYS.indexOf(b.name))
 

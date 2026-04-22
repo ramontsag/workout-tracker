@@ -103,6 +103,7 @@ export default function App() {
     return (
       <ProgramSetup
         userId={user?.id}
+        userEmail={user?.email}
         initialDays={program.length > 0 ? program : null}
         isEditing={program.length > 0}
         onComplete={loadProgram}
