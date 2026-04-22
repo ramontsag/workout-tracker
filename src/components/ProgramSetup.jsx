@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { saveProgram, getAllKnownExerciseNames } from '../supabase'
 import { DEFAULT_DAYS } from '../data/defaultProgram'
+import {
+  CURATED_ACTIVITIES, FIELD_CATALOG, defaultFieldsFor, DEFAULT_ACTIVITY_FIELDS,
+} from '../data/commonActivities'
 
 // ─────────────────────────────────────────────────────────────
 // Single day accordion card
@@ -8,7 +11,7 @@ import { DEFAULT_DAYS } from '../data/defaultProgram'
 function DayCard({
   day, isOpen, onToggle, onChange,
   newInput, onNewInputChange, onAddItem, onAddItemWithName,
-  onRemoveItem, onMoveItem, onToggleItemType, onUpdateTarget,
+  onRemoveItem, onMoveItem, onToggleItemType, onUpdateTarget, onToggleActivityField,
   suggestions,
 }) {
   const [showSuggest, setShowSuggest] = useState(false)
@@ -113,6 +116,25 @@ function DayCard({
                       onChange={e => onUpdateTarget(j, e.target.value)}
                     />
                   )}
+
+                  {/* Field picker — only for activity items */}
+                  {isActivity && (
+                    <div className="activity-fields-picker">
+                      {FIELD_CATALOG.map(f => {
+                        const active = (item.activity_fields || DEFAULT_ACTIVITY_FIELDS).includes(f.key)
+                        return (
+                          <button
+                            key={f.key}
+                            type="button"
+                            className={`activity-field-pill${active ? ' activity-field-pill--on' : ''}`}
+                            onClick={() => onToggleActivityField(j, f.key)}
+                          >
+                            {f.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -176,7 +198,19 @@ export default function ProgramSetup({ userId, initialDays, isEditing, onComplet
 
   useEffect(() => {
     if (!userId) return
-    getAllKnownExerciseNames(userId).then(setSuggestions).catch(() => {})
+    getAllKnownExerciseNames(userId)
+      .then(names => {
+        // Union the curated activities list so common activity names
+        // (Running, BJJ, Yoga…) show up as suggestions even on a brand
+        // new account with no history. Dedupe case-insensitively.
+        const seen = new Map()
+        for (const n of [...names, ...CURATED_ACTIVITIES]) {
+          const k = n.toLowerCase()
+          if (!seen.has(k)) seen.set(k, n)
+        }
+        setSuggestions([...seen.values()].sort((a, b) => a.localeCompare(b)))
+      })
+      .catch(() => {})
   }, [userId])
 
   // ── Day helpers ───────────────────────────────────────────
@@ -223,13 +257,21 @@ export default function ProgramSetup({ userId, initialDays, isEditing, onComplet
     setDays(prev => prev.map((d, i) =>
       i !== dayIdx ? d : {
         ...d,
-        exercises: d.exercises.map((item, j) =>
-          j !== itemIdx ? item : {
+        exercises: d.exercises.map((item, j) => {
+          if (j !== itemIdx) return item
+          const becomingActivity = item.item_type === 'exercise'
+          return {
             ...item,
-            item_type: item.item_type === 'exercise' ? 'activity' : 'exercise',
-            target:    item.item_type === 'exercise' ? '' : item.target, // clear target when switching to activity
+            item_type:       becomingActivity ? 'activity' : 'exercise',
+            target:          becomingActivity ? '' : item.target,
+            // Seed field selection with a preset based on the name (e.g.
+            // "Running" gets distance+duration+HR). If already configured,
+            // keep the existing selection.
+            activity_fields: becomingActivity
+              ? (item.activity_fields || defaultFieldsFor(item.name))
+              : item.activity_fields,
           }
-        ),
+        }),
       }
     ))
 
@@ -238,6 +280,21 @@ export default function ProgramSetup({ userId, initialDays, isEditing, onComplet
       i !== dayIdx ? d : {
         ...d,
         exercises: d.exercises.map((item, j) => j === itemIdx ? { ...item, target } : item),
+      }
+    ))
+
+  const toggleActivityField = (dayIdx, itemIdx, fieldKey) =>
+    setDays(prev => prev.map((d, i) =>
+      i !== dayIdx ? d : {
+        ...d,
+        exercises: d.exercises.map((item, j) => {
+          if (j !== itemIdx) return item
+          const current = item.activity_fields || DEFAULT_ACTIVITY_FIELDS
+          const next = current.includes(fieldKey)
+            ? current.filter(k => k !== fieldKey)
+            : [...current, fieldKey]
+          return { ...item, activity_fields: next }
+        }),
       }
     ))
 
@@ -293,6 +350,7 @@ export default function ProgramSetup({ userId, initialDays, isEditing, onComplet
             onMoveItem={(itemIdx, dir) => moveItem(i, itemIdx, dir)}
             onToggleItemType={itemIdx => toggleItemType(i, itemIdx)}
             onUpdateTarget={(itemIdx, target) => updateTarget(i, itemIdx, target)}
+            onToggleActivityField={(itemIdx, fieldKey) => toggleActivityField(i, itemIdx, fieldKey)}
             suggestions={suggestions}
           />
         ))}

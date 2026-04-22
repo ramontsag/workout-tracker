@@ -263,11 +263,11 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
 
             let countLabel
             if (exCount > 0 && actCount > 0)
-              countLabel = `${exCount} movement${exCount !== 1 ? 's' : ''} · ${actCount} drill${actCount !== 1 ? 's' : ''}`
+              countLabel = `${exCount} lift${exCount !== 1 ? 's' : ''} · ${actCount} activit${actCount !== 1 ? 'ies' : 'y'}`
             else if (exCount > 0)
-              countLabel = `${exCount} movement${exCount !== 1 ? 's' : ''}`
+              countLabel = `${exCount} lift${exCount !== 1 ? 's' : ''}`
             else if (actCount > 0)
-              countLabel = `${actCount} drill${actCount !== 1 ? 's' : ''}`
+              countLabel = `${actCount} activit${actCount !== 1 ? 'ies' : 'y'}`
             else
               countLabel = 'Rest day'
 

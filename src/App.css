@@ -2009,3 +2009,131 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   font-style: italic;
 }
 .history-set-row--warmup .history-set-num { color: var(--cyan); }
+
+/* ── Tranche 2: hybrid activities ─────────────────── */
+/* Program-setup field picker pills */
+.activity-fields-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.activity-field-pill {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--surface3);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  letter-spacing: 0.2px;
+}
+.activity-field-pill--on {
+  background: rgba(0, 194, 168, 0.15);
+  color: var(--cyan);
+  border-color: rgba(0, 194, 168, 0.5);
+}
+
+/* Workout-logging inline activity fields */
+.activity-log-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+.activity-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.activity-field--wide { grid-column: 1 / -1; }
+.activity-field-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.activity-field-input-wrap {
+  display: flex;
+  align-items: center;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
+}
+.activity-field-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 8px 0;
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+.activity-field-suffix {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 6px;
+  letter-spacing: 0.3px;
+}
+
+/* 1–5 intensity dot picker */
+.intensity-dots {
+  display: flex;
+  gap: 8px;
+  padding: 6px 0;
+}
+.intensity-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  padding: 0;
+}
+.intensity-dot--on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* "Last: …" micro-summary under activity name */
+.activity-last-summary {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+  letter-spacing: 0.2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Progress screen activity stat tiles */
+.progress-stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.progress-stat-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 8px;
+  text-align: center;
+}
+.progress-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.progress-stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}

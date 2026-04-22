@@ -30,3 +30,43 @@ export function kgToInputValue(kg, unit) {
   if (kg == null || kg === 0 || kg === '') return ''
   return displayWeight(kg, unit)
 }
+
+// ── Distance (km ↔ mi) ──────────────────────────────────────
+// DB stores km. lbs users see miles.
+const KM_PER_MILE = 1.609344
+
+export const kmToMiles = (km) => km / KM_PER_MILE
+export const milesToKm = (mi) => mi * KM_PER_MILE
+export const distanceUnitLabel = (unit) => (unit === 'lbs' ? 'mi' : 'km')
+
+export function displayDistance(km, unit) {
+  if (km == null || km === '' || isNaN(km)) return ''
+  const val = unit === 'lbs' ? kmToMiles(Number(km)) : Number(km)
+  const rounded = Math.round(val * 100) / 100
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded)
+}
+
+export function parseInputDistance(raw, unit) {
+  const n = parseFloat(raw)
+  if (isNaN(n)) return NaN
+  return unit === 'lbs' ? milesToKm(n) : n
+}
+
+// ── Elevation (m ↔ ft) ──────────────────────────────────────
+const M_PER_FOOT = 0.3048
+
+export const metersToFeet = (m) => m / M_PER_FOOT
+export const feetToMeters = (ft) => ft * M_PER_FOOT
+export const elevationUnitLabel = (unit) => (unit === 'lbs' ? 'ft' : 'm')
+
+export function displayElevation(m, unit) {
+  if (m == null || m === '' || isNaN(m)) return ''
+  const val = unit === 'lbs' ? metersToFeet(Number(m)) : Number(m)
+  return String(Math.round(val))
+}
+
+export function parseInputElevation(raw, unit) {
+  const n = parseFloat(raw)
+  if (isNaN(n)) return NaN
+  return unit === 'lbs' ? feetToMeters(n) : n
+}

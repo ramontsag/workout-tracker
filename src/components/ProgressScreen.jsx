@@ -2,8 +2,13 @@ import React, { useState, useEffect } from 'react'
 import {
   logBodyWeight, getBodyWeightLogs,
   getExerciseNames, getVolumeHistory,
+  getActivityNames, getActivityHistory, bucketActivityByWeek,
 } from '../supabase'
-import { displayWeight, parseInputWeight, unitLabel, kgToLbs } from '../utils/units'
+import {
+  displayWeight, parseInputWeight, unitLabel, kgToLbs,
+  displayDistance, distanceUnitLabel,
+  displayElevation, elevationUnitLabel,
+} from '../utils/units'
 
 function getToday() {
   const d = new Date()
@@ -118,6 +123,13 @@ export default function ProgressScreen({ user, profile, onBack }) {
   const [volumeLoading,     setVolumeLoading]     = useState(false)
   const [volumeError,       setVolumeError]       = useState('')
 
+  // ── Activities state ────────────────────────────────────
+  const [activityNames,    setActivityNames]    = useState([])
+  const [selectedActivity, setSelectedActivity] = useState('')
+  const [activityHistory,  setActivityHistory]  = useState([])
+  const [activityLoading,  setActivityLoading]  = useState(false)
+  const [activityError,    setActivityError]    = useState('')
+
   useEffect(() => {
     if (!user?.id) return
     getBodyWeightLogs(user.id, 12).then(setWeightLogs).catch(() => {})
@@ -125,6 +137,12 @@ export default function ProgressScreen({ user, profile, onBack }) {
       .then(names => {
         setExerciseNames(names)
         if (names.length) setSelectedExercise(names[0])
+      })
+      .catch(() => {})
+    getActivityNames(user.id)
+      .then(names => {
+        setActivityNames(names)
+        if (names.length) setSelectedActivity(names[0])
       })
       .catch(() => {})
   }, [user?.id])
@@ -137,6 +155,15 @@ export default function ProgressScreen({ user, profile, onBack }) {
       .then(data => { setVolumeHistory(data); setVolumeLoading(false) })
       .catch(e  => { setVolumeError(e.message); setVolumeLoading(false) })
   }, [selectedExercise, user?.id])
+
+  useEffect(() => {
+    if (!selectedActivity || !user?.id) return
+    setActivityLoading(true)
+    setActivityError('')
+    getActivityHistory(selectedActivity, user.id)
+      .then(data => { setActivityHistory(data); setActivityLoading(false) })
+      .catch(e  => { setActivityError(e.message); setActivityLoading(false) })
+  }, [selectedActivity, user?.id])
 
   const handleLogWeight = async () => {
     const kg = parseInputWeight(weightInput, unit)
@@ -165,6 +192,61 @@ export default function ProgressScreen({ user, profile, onBack }) {
   // unit conversion here would only change the y-axis scale, not shape.
   const volumeSparkValues = [...volumeHistory].reverse().map(s => s.totalVolume)
 
+  // ── Activity derived stats ─────────────────────────────
+  // Primary metric: distance_km if any session has it, else duration_min, else session count.
+  const hasDistance = activityHistory.some(s => s.distance_km != null && s.distance_km > 0)
+  const hasDuration = activityHistory.some(s => s.duration_min != null && s.duration_min > 0)
+  const primaryMetric = hasDistance ? 'distance' : hasDuration ? 'duration' : 'count'
+
+  // Buckets come back newest-first (index 0 = this week).
+  const activityWeekly = bucketActivityByWeek(activityHistory, 12)
+  // Sparkline reads oldest→newest so time flows left-to-right.
+  const activitySparkValues = [...activityWeekly].reverse().map(w => {
+    if (primaryMetric === 'distance') return w.totalDistance
+    if (primaryMetric === 'duration') return w.totalDuration
+    return w.sessionCount
+  })
+
+  const thisWeek = activityWeekly[0] || { totalDuration: 0, totalDistance: 0, sessionCount: 0 }
+  const last4 = activityWeekly.slice(0, 4)
+  const avg4 = last4.length
+    ? {
+        dur:   last4.reduce((a, w) => a + w.totalDuration, 0) / last4.length,
+        dist:  last4.reduce((a, w) => a + w.totalDistance, 0) / last4.length,
+        count: last4.reduce((a, w) => a + w.sessionCount, 0) / last4.length,
+      }
+    : { dur: 0, dist: 0, count: 0 }
+
+  // Notable: longest single distance, or longest duration, or highest rounds.
+  const notable = (() => {
+    if (hasDistance) {
+      const max = Math.max(...activityHistory.map(s => s.distance_km || 0))
+      return { label: 'Longest', value: `${displayDistance(max, unit)} ${distanceUnitLabel(unit)}` }
+    }
+    if (hasDuration) {
+      const max = Math.max(...activityHistory.map(s => s.duration_min || 0))
+      return { label: 'Longest', value: `${Math.round(max)} min` }
+    }
+    const hasRounds = activityHistory.some(s => s.rounds != null && s.rounds > 0)
+    if (hasRounds) {
+      const max = Math.max(...activityHistory.map(s => s.rounds || 0))
+      return { label: 'Most rounds', value: String(max) }
+    }
+    return { label: 'Sessions', value: String(activityHistory.length) }
+  })()
+
+  const formatSessionLine = (s) => {
+    const parts = []
+    if (s.distance_km != null && s.distance_km > 0) parts.push(`${displayDistance(s.distance_km, unit)} ${distanceUnitLabel(unit)}`)
+    if (s.duration_min != null && s.duration_min > 0) parts.push(`${Math.round(s.duration_min)} min`)
+    if (s.intensity != null) parts.push(`${s.intensity}/5`)
+    if (s.avg_hr != null && s.avg_hr > 0) parts.push(`${s.avg_hr} bpm`)
+    if (s.calories != null && s.calories > 0) parts.push(`${s.calories} kcal`)
+    if (s.rounds != null && s.rounds > 0) parts.push(`${s.rounds} rds`)
+    if (s.elevation_m != null && s.elevation_m > 0) parts.push(`${displayElevation(s.elevation_m, unit)} ${elevationUnitLabel(unit)}`)
+    return parts.join(' · ')
+  }
+
   return (
     <div className="screen">
       <header className="sub-header">
@@ -187,6 +269,12 @@ export default function ProgressScreen({ user, profile, onBack }) {
           onClick={() => setActiveTab('workout')}
         >
           Workout
+        </button>
+        <button
+          className={`setup-tab ${activeTab === 'activities' ? 'setup-tab--active' : ''}`}
+          onClick={() => setActiveTab('activities')}
+        >
+          Activities
         </button>
       </div>
 
@@ -314,6 +402,97 @@ export default function ProgressScreen({ user, profile, onBack }) {
                       </div>
                     ) : (
                       <div className="state-msg state-msg--empty">No sessions logged yet</div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {/* ── Activities tab ────────────────────────────── */}
+        {activeTab === 'activities' && (
+          <>
+            {activityNames.length === 0 ? (
+              <div className="state-msg state-msg--empty">No activities in your program yet</div>
+            ) : (
+              <>
+                <select
+                  className="field-input volume-select"
+                  value={selectedActivity}
+                  onChange={e => setSelectedActivity(e.target.value)}
+                >
+                  {activityNames.map(n => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+
+                {activityLoading && (
+                  <div className="state-msg state-msg--empty">Loading…</div>
+                )}
+                {activityError && (
+                  <div className="err-msg" style={{ textAlign: 'left' }}>{activityError}</div>
+                )}
+
+                {!activityLoading && !activityError && (
+                  <>
+                    {activityHistory.length < 2 ? (
+                      <div className="state-msg state-msg--empty">
+                        {activityHistory.length === 0
+                          ? 'No sessions logged yet'
+                          : 'Log one more session to see your trend'}
+                      </div>
+                    ) : (
+                      <>
+                        {activitySparkValues.some(v => v > 0) && (
+                          <div className="sparkline-wrap">
+                            <Sparkline values={activitySparkValues} color="#00C2A8" />
+                          </div>
+                        )}
+
+                        <div className="progress-stat-row">
+                          <div className="progress-stat-box">
+                            <div className="progress-stat-label">This week</div>
+                            <div className="progress-stat-value">
+                              {primaryMetric === 'distance'
+                                ? `${displayDistance(thisWeek.totalDistance, unit)} ${distanceUnitLabel(unit)}`
+                                : primaryMetric === 'duration'
+                                ? `${Math.round(thisWeek.totalDuration)} min`
+                                : `${thisWeek.sessionCount} ${thisWeek.sessionCount === 1 ? 'session' : 'sessions'}`}
+                            </div>
+                          </div>
+                          <div className="progress-stat-box">
+                            <div className="progress-stat-label">4-wk avg</div>
+                            <div className="progress-stat-value">
+                              {primaryMetric === 'distance'
+                                ? `${displayDistance(avg4.dist, unit)} ${distanceUnitLabel(unit)}`
+                                : primaryMetric === 'duration'
+                                ? `${Math.round(avg4.dur)} min`
+                                : `${avg4.count.toFixed(1)}/wk`}
+                            </div>
+                          </div>
+                          <div className="progress-stat-box">
+                            <div className="progress-stat-label">{notable.label}</div>
+                            <div className="progress-stat-value">{notable.value}</div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {activityHistory.length > 0 && (
+                      <div className="weight-history-list" style={{ marginTop: 16 }}>
+                        {activityHistory.map((s, i) => {
+                          const line = formatSessionLine(s)
+                          return (
+                            <div key={`${s.date}-${i}`} className="weight-history-item">
+                              <span className="weight-history-date">{fmtDate(s.date)}</span>
+                              <span className="weight-history-val">
+                                {line || (s.checked ? 'done' : '—')}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
                     )}
                   </>
                 )}

@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import { getLastSession, saveWorkout, getPreviousSessionVolume, saveTemplate, getExerciseBests } from '../supabase'
-import { displayWeight, parseInputWeight, unitLabel } from '../utils/units'
+import {
+  displayWeight, parseInputWeight, unitLabel,
+  displayDistance, parseInputDistance, distanceUnitLabel,
+  displayElevation, parseInputElevation, elevationUnitLabel,
+} from '../utils/units'
+import { DEFAULT_ACTIVITY_FIELDS } from '../data/commonActivities'
 
 function fmt(val) {
   return val === 0 || val === '0' ? '—' : val
@@ -241,8 +246,32 @@ function ExerciseCard({
   )
 }
 
-// ── Activity item card (checkbox + optional notes) ────────────
-function ActivityCard({ item, log, onToggle, onNotes }) {
+// ── Activity item card — configured fields inline ─────────────
+// `item.activity_fields` is the user's selection (array of field keys).
+// Backwards-compat: if null/undefined, falls back to checkbox + notes only.
+function ActivityCard({ item, log, unit, lastLog, onToggle, onUpdate }) {
+  const fields = item.activity_fields || DEFAULT_ACTIVITY_FIELDS
+  const has = (k) => fields.includes(k)
+
+  // "Last time" summary — one compact line of the fields the user tracks.
+  const summaryParts = []
+  if (lastLog) {
+    if (has('duration_min') && lastLog.duration_min)
+      summaryParts.push(`${lastLog.duration_min} min`)
+    if (has('distance_km')  && lastLog.distance_km)
+      summaryParts.push(`${displayDistance(lastLog.distance_km, unit)} ${distanceUnitLabel(unit)}`)
+    if (has('intensity')    && lastLog.intensity)
+      summaryParts.push(`${lastLog.intensity}/5`)
+    if (has('avg_hr')       && lastLog.avg_hr)
+      summaryParts.push(`${lastLog.avg_hr} bpm`)
+    if (has('calories')     && lastLog.calories)
+      summaryParts.push(`${lastLog.calories} kcal`)
+    if (has('rounds')       && lastLog.rounds)
+      summaryParts.push(`${lastLog.rounds} rounds`)
+    if (has('elevation_m')  && lastLog.elevation_m)
+      summaryParts.push(`${displayElevation(lastLog.elevation_m, unit)} ${elevationUnitLabel(unit)}`)
+  }
+
   return (
     <div className="ex-card activity-item-card">
       <button className="activity-row" onClick={onToggle}>
@@ -256,13 +285,133 @@ function ActivityCard({ item, log, onToggle, onNotes }) {
           {item.name}
         </span>
       </button>
-      <textarea
-        className="activity-notes"
-        placeholder="Details…"
-        value={log.notes}
-        onChange={e => onNotes(e.target.value)}
-        rows={2}
-      />
+
+      {summaryParts.length > 0 && (
+        <div className="activity-last-summary">Last: {summaryParts.join(' · ')}</div>
+      )}
+
+      {(has('duration_min') || has('distance_km') || has('avg_hr') ||
+        has('calories') || has('rounds') || has('elevation_m') || has('intensity')) && (
+        <div className="activity-log-grid">
+          {has('duration_min') && (
+            <div className="activity-field">
+              <label className="activity-field-label">Duration</label>
+              <div className="activity-field-input-wrap">
+                <input
+                  className="activity-field-input"
+                  type="number"
+                  inputMode="decimal"
+                  value={log.duration_min ?? ''}
+                  onChange={e => onUpdate('duration_min', e.target.value)}
+                />
+                <span className="activity-field-suffix">min</span>
+              </div>
+            </div>
+          )}
+          {has('distance_km') && (
+            <div className="activity-field">
+              <label className="activity-field-label">Distance</label>
+              <div className="activity-field-input-wrap">
+                <input
+                  className="activity-field-input"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  value={log.distance_display ?? ''}
+                  onChange={e => onUpdate('distance_display', e.target.value)}
+                />
+                <span className="activity-field-suffix">{distanceUnitLabel(unit)}</span>
+              </div>
+            </div>
+          )}
+          {has('avg_hr') && (
+            <div className="activity-field">
+              <label className="activity-field-label">Avg HR</label>
+              <div className="activity-field-input-wrap">
+                <input
+                  className="activity-field-input"
+                  type="number"
+                  inputMode="numeric"
+                  value={log.avg_hr ?? ''}
+                  onChange={e => onUpdate('avg_hr', e.target.value)}
+                />
+                <span className="activity-field-suffix">bpm</span>
+              </div>
+            </div>
+          )}
+          {has('calories') && (
+            <div className="activity-field">
+              <label className="activity-field-label">Calories</label>
+              <div className="activity-field-input-wrap">
+                <input
+                  className="activity-field-input"
+                  type="number"
+                  inputMode="numeric"
+                  value={log.calories ?? ''}
+                  onChange={e => onUpdate('calories', e.target.value)}
+                />
+                <span className="activity-field-suffix">kcal</span>
+              </div>
+            </div>
+          )}
+          {has('rounds') && (
+            <div className="activity-field">
+              <label className="activity-field-label">Rounds</label>
+              <div className="activity-field-input-wrap">
+                <input
+                  className="activity-field-input"
+                  type="number"
+                  inputMode="numeric"
+                  value={log.rounds ?? ''}
+                  onChange={e => onUpdate('rounds', e.target.value)}
+                />
+                <span className="activity-field-suffix">×</span>
+              </div>
+            </div>
+          )}
+          {has('elevation_m') && (
+            <div className="activity-field">
+              <label className="activity-field-label">Elevation</label>
+              <div className="activity-field-input-wrap">
+                <input
+                  className="activity-field-input"
+                  type="number"
+                  inputMode="numeric"
+                  value={log.elevation_display ?? ''}
+                  onChange={e => onUpdate('elevation_display', e.target.value)}
+                />
+                <span className="activity-field-suffix">{elevationUnitLabel(unit)}</span>
+              </div>
+            </div>
+          )}
+          {has('intensity') && (
+            <div className="activity-field activity-field--wide">
+              <label className="activity-field-label">Intensity</label>
+              <div className="intensity-dots">
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={`intensity-dot${(log.intensity || 0) >= n ? ' intensity-dot--on' : ''}`}
+                    onClick={() => onUpdate('intensity', log.intensity === n ? '' : n)}
+                    aria-label={`Intensity ${n}`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {has('notes') && (
+        <textarea
+          className="activity-notes"
+          placeholder="Details…"
+          value={log.notes || ''}
+          onChange={e => onUpdate('notes', e.target.value)}
+          rows={2}
+        />
+      )}
     </div>
   )
 }
@@ -283,8 +432,16 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
     )
   )
 
+  // Activity log shape includes display-unit fields for distance/elevation
+  // (distance_display, elevation_display) — we convert to canonical km/m at
+  // save time so the DB always stores metric.
+  const makeEmptyActivity = () => ({
+    checked: false, notes: '',
+    duration_min: '', distance_display: '', intensity: '',
+    avg_hr: '', calories: '', rounds: '', elevation_display: '',
+  })
   const [activityLogs, setActivityLogs] = useState(() =>
-    Object.fromEntries(activityItems.map(a => [a.name, { checked: false, notes: '' }]))
+    Object.fromEntries(activityItems.map(a => [a.name, makeEmptyActivity()]))
   )
 
   const [lastSession, setLastSession] = useState(null)
@@ -430,13 +587,23 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
   const toggleActivity = (name) =>
     setActivityLogs(prev => ({ ...prev, [name]: { ...prev[name], checked: !prev[name].checked } }))
 
-  const setNotes = (name, notes) =>
-    setActivityLogs(prev => ({ ...prev, [name]: { ...prev[name], notes } }))
+  const updateActivityField = (name, field, value) =>
+    setActivityLogs(prev => ({ ...prev, [name]: { ...prev[name], [field]: value } }))
+
+  // Last-session activity log for a given activity, if any.
+  // Only the first matching row (set_number=1) is relevant.
+  const getLastActivityLog = (name) => {
+    if (!lastSession) return null
+    return lastSession.sets.find(s => s.exercise_name === name && s.set_number === 1) || null
+  }
 
   // ── Completion ──────────────────────────────────────────
   const hasData =
     Object.values(sets).some(s => s.some(r => r.weight !== '' || r.reps !== '')) ||
-    Object.values(activityLogs).some(l => l.checked)
+    Object.values(activityLogs).some(l =>
+      l.checked || l.duration_min || l.distance_display || l.intensity ||
+      l.avg_hr || l.calories || l.rounds || l.elevation_display || l.notes
+    )
 
   const handleComplete = async () => {
     if (!hasData && !isRestDay) { setErrMsg('Log at least one set or check an activity first.'); return }
@@ -457,10 +624,32 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
           })),
         ])
       )
+      // Canonicalize activity distances/elevations into km/m before saving.
+      const activityLogsForSave = Object.fromEntries(
+        Object.entries(activityLogs).map(([name, log]) => {
+          const distKm = log.distance_display === '' || log.distance_display == null
+            ? null
+            : parseInputDistance(log.distance_display, unit)
+          const elevM  = log.elevation_display === '' || log.elevation_display == null
+            ? null
+            : parseInputElevation(log.elevation_display, unit)
+          return [name, {
+            checked:      log.checked,
+            notes:        log.notes,
+            duration_min: log.duration_min,
+            distance_km:  isNaN(distKm) ? null : distKm,
+            intensity:    log.intensity,
+            avg_hr:       log.avg_hr,
+            calories:     log.calories,
+            rounds:       log.rounds,
+            elevation_m:  isNaN(elevM) ? null : elevM,
+          }]
+        })
+      )
       const workout = await saveWorkout(
         day.id,
         `${day.name}${day.focus ? ` — ${day.focus}` : ''}`,
-        setsForSave, activityLogs, userId
+        setsForSave, activityLogsForSave, userId
       )
       const currentVolKg = calcSessionVolume(sets, unit)
       let msg = ''
@@ -561,9 +750,11 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
             <ActivityCard
               key={item.name}
               item={item}
-              log={activityLogs[item.name]}
+              log={activityLogs[item.name] || makeEmptyActivity()}
+              unit={unit}
+              lastLog={getLastActivityLog(item.name)}
               onToggle={() => toggleActivity(item.name)}
-              onNotes={notes => setNotes(item.name, notes)}
+              onUpdate={(field, val) => updateActivityField(item.name, field, val)}
             />
           ) : (
             <ExerciseCard

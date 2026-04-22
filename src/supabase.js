@@ -127,7 +127,12 @@ export async function getProgram() {
     rest_seconds: day.rest_seconds ?? 90,
     exercises:    (day.exercises || [])
       .sort((a, b) => a.sort_order - b.sort_order)
-      .map(e => ({ name: e.name, target: e.target || '', item_type: e.item_type || 'exercise' })),
+      .map(e => ({
+        name:            e.name,
+        target:          e.target || '',
+        item_type:       e.item_type || 'exercise',
+        activity_fields: Array.isArray(e.activity_fields) ? e.activity_fields : null,
+      })),
   }))
 
   // Names already covered by training_days — used to skip duplicates
@@ -249,6 +254,9 @@ export async function saveProgram(days, uid) {
         target:          ex.target || '',
         item_type:       ex.item_type || 'exercise',
         sort_order:      j,
+        activity_fields: ex.item_type === 'activity' && Array.isArray(ex.activity_fields)
+          ? ex.activity_fields
+          : null,
       })
     )
   }
@@ -289,7 +297,9 @@ export async function getLastSession(trainingDayId) {
 // uid passed in from App state — no auth call needed
 // exerciseSets:  { [name]: [{ weight_kg, reps, is_warmup, rir, rpe }] }
 //   weight_kg is already in kg (caller converts from user unit)
-// activityLogs:  { [name]: { checked, notes } }   — activity items
+// activityLogs:  { [name]: { checked, notes, duration_min, distance_km,
+//                            intensity, avg_hr, calories, rounds, elevation_m } }
+//   distance/elevation already canonicalized to km/m by caller.
 export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activityLogs, uid) {
   if (!uid) throw new Error('Not authenticated')
 
@@ -336,6 +346,16 @@ export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activit
   }
 
   // Activity items — one row per activity (set_number = 1)
+  const numOrNull = (v) => {
+    if (v === '' || v == null) return null
+    const n = typeof v === 'number' ? v : parseFloat(v)
+    return isNaN(n) ? null : n
+  }
+  const intOrNull = (v) => {
+    if (v === '' || v == null) return null
+    const n = typeof v === 'number' ? v : parseInt(v)
+    return isNaN(n) ? null : n
+  }
   for (const [activityName, log] of Object.entries(activityLogs)) {
     rowsToInsert.push({
       user_id:       uid,
@@ -344,8 +364,15 @@ export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activit
       set_number:    1,
       weight_kg:     0,
       reps:          0,
-      checked:       log.checked,
+      checked:       !!log.checked,
       notes:         log.notes || '',
+      duration_min:  numOrNull(log.duration_min),
+      distance_km:   numOrNull(log.distance_km),
+      intensity:     intOrNull(log.intensity),
+      avg_hr:        intOrNull(log.avg_hr),
+      calories:      numOrNull(log.calories),
+      rounds:        intOrNull(log.rounds),
+      elevation_m:   numOrNull(log.elevation_m),
     })
   }
 
@@ -796,4 +823,103 @@ export async function getVolumeHistory(exerciseName, uid, limit = 10) {
   return Object.values(byWorkout)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
     .slice(0, limit)
+}
+
+// ── Activity Stats ────────────────────────────────────────────
+
+// Returns distinct activity names defined in the user's current program,
+// sorted alphabetically. Used by the Progress screen's Activities tab.
+export async function getActivityNames(uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data, error } = await withTimeout(
+    supabase
+      .from('exercises')
+      .select('name')
+      .eq('user_id', uid)
+      .eq('item_type', 'activity')
+      .order('name', { ascending: true }),
+    5000, 'Load activity names'
+  )
+  if (error) throw new Error(`Load activities failed: ${error.message}`)
+  const seen = new Set()
+  return (data || []).filter(r => seen.has(r.name) ? false : seen.add(r.name)).map(r => r.name)
+}
+
+// Returns per-session metrics for one activity, newest first.
+// Row shape: { date, duration_min, distance_km, intensity, avg_hr,
+//              calories, rounds, elevation_m, notes, checked }
+export async function getActivityHistory(activityName, uid, limit = 52) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data, error } = await withTimeout(
+    supabase
+      .from('workout_sets')
+      .select('duration_min, distance_km, intensity, avg_hr, calories, rounds, elevation_m, notes, checked, workout:workouts(id, completed_at, day_name)')
+      .eq('exercise_name', activityName)
+      .eq('user_id', uid)
+      .order('workout_id', { ascending: false }),
+    5000, 'Load activity history'
+  )
+  if (error) throw new Error(`Load activity history failed: ${error.message}`)
+
+  return (data || [])
+    .map(row => ({
+      workoutId:    row.workout?.id,
+      date:         row.workout?.completed_at,
+      dayName:      row.workout?.day_name,
+      duration_min: row.duration_min,
+      distance_km:  row.distance_km,
+      intensity:    row.intensity,
+      avg_hr:       row.avg_hr,
+      calories:     row.calories,
+      rounds:       row.rounds,
+      elevation_m:  row.elevation_m,
+      notes:        row.notes,
+      checked:      row.checked,
+    }))
+    .filter(r => r.date)
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, limit)
+}
+
+// Pure client-side helper: buckets session history into weekly totals.
+// weekStart is the Monday ISO date (YYYY-MM-DD) of each bucket, most recent first.
+// Returns up to `weeks` buckets. Missing weeks get zero-valued entries so the
+// sparkline doesn't misleadingly smooth over inactive periods.
+export function bucketActivityByWeek(sessions, weeks = 12) {
+  // Floor a date to the Monday of its week, local time.
+  const mondayOf = (d) => {
+    const x = new Date(d)
+    const day = x.getDay()            // 0 = Sun
+    const delta = day === 0 ? -6 : 1 - day
+    x.setDate(x.getDate() + delta)
+    x.setHours(0, 0, 0, 0)
+    return x
+  }
+
+  // Build the target bucket range: last `weeks` Mondays including this week.
+  const thisMonday = mondayOf(new Date())
+  const buckets = []
+  for (let i = 0; i < weeks; i++) {
+    const d = new Date(thisMonday)
+    d.setDate(thisMonday.getDate() - i * 7)
+    buckets.push({
+      weekStart:     d.toISOString().slice(0, 10),
+      totalDuration: 0,
+      totalDistance: 0,
+      sessionCount:  0,
+    })
+  }
+  const byKey = Object.fromEntries(buckets.map(b => [b.weekStart, b]))
+
+  for (const s of sessions) {
+    if (!s.date) continue
+    const key = mondayOf(s.date).toISOString().slice(0, 10)
+    const b = byKey[key]
+    if (!b) continue
+    if (s.duration_min) b.totalDuration += Number(s.duration_min)
+    if (s.distance_km)  b.totalDistance += Number(s.distance_km)
+    b.sessionCount += 1
+  }
+
+  return buckets
 }
