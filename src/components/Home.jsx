@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { getBodyWeightLogs, logBodyWeight, getWeeklyProgress } from '../supabase'
+import { getBodyWeightLogs, logBodyWeight, getWeeklyProgress, getInProgressDayIds, discardDraft, getInProgressWorkout } from '../supabase'
 import { displayWeight, parseInputWeight, unitLabel } from '../utils/units'
 
 const DAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
@@ -108,6 +108,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
   const [saving,         setSaving]         = useState(false)
   const [error,          setError]          = useState('')
   const [weeklyProgress, setWeeklyProgress] = useState(null)
+  const [draftDayIds,    setDraftDayIds]    = useState(new Set())
 
   useEffect(() => {
     if (!userId) return
@@ -117,7 +118,25 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
     getWeeklyProgress(userId)
       .then(setWeeklyProgress)
       .catch(() => {})
+    getInProgressDayIds(userId)
+      .then(setDraftDayIds)
+      .catch(() => {})
   }, [userId])
+
+  const handleDiscardDraft = async (dayId) => {
+    try {
+      const draft = await getInProgressWorkout(dayId, userId)
+      if (draft) await discardDraft(draft.id, userId)
+    } catch { /* non-fatal */ }
+    // Clear the local cache so the next open starts fresh.
+    try { window.localStorage.removeItem(`wt:draft:${userId}:${dayId}`) } catch {}
+    setDraftDayIds(prev => {
+      const next = new Set(prev)
+      next.delete(dayId)
+      return next
+    })
+    setPendingDay(null)
+  }
 
   const handleLogWeight = async () => {
     const kg = parseInputWeight(weightInput, unit)
@@ -273,6 +292,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
 
             const typeClass     = isEmpty ? 'day-card--empty' : isGymDay ? 'day-card--gym' : 'day-card--rest'
             const indicatorType = isEmpty ? 'empty' : isGymDay ? 'gym' : 'rest'
+            const hasDraft      = draftDayIds.has(day.id)
 
             return (
               <button
@@ -281,6 +301,9 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
                 style={{ animationDelay: `${i * 50}ms` }}
                 onClick={() => isToday ? onSelectDay(day) : setPendingDay(day)}
               >
+                {hasDraft && (
+                  <span className="day-card__draft-dot" title="Unfinished workout" aria-label="In progress" />
+                )}
                 {isToday && (
                   <div className={`day-card__stripe day-card__stripe--${indicatorType}`}>
                     <span className="day-card__abbr">{DAY_ABBREV[day.name] || day.name.slice(0, 3).toUpperCase()}</span>
@@ -315,12 +338,21 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
               {pendingDay.name}{pendingDay.focus ? <span className="makeup-sheet__focus"> — {pendingDay.focus}</span> : null}
             </div>
             <div className="makeup-sheet__sub">
-              Logging for today, {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+              {draftDayIds.has(pendingDay.id)
+                ? 'You have an unfinished workout for this day.'
+                : `Logging for today, ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}`}
             </div>
             <div className="makeup-sheet__btns">
               <button className="makeup-sheet__go" onClick={() => { onSelectDay(pendingDay); setPendingDay(null) }}>
-                Start {pendingDay.name}'s Workout
+                {draftDayIds.has(pendingDay.id)
+                  ? `Resume ${pendingDay.name}'s Workout`
+                  : `Start ${pendingDay.name}'s Workout`}
               </button>
+              {draftDayIds.has(pendingDay.id) && (
+                <button className="makeup-sheet__discard" onClick={() => handleDiscardDraft(pendingDay.id)}>
+                  Discard unfinished workout
+                </button>
+              )}
               <button className="makeup-sheet__cancel" onClick={() => setPendingDay(null)}>
                 Cancel
               </button>

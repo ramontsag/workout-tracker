@@ -277,6 +277,7 @@ export async function getLastSession(trainingDayId) {
       .from('workouts')
       .select('id, completed_at')
       .eq('training_day_id', trainingDayId)
+      .eq('status', 'completed')
       .order('completed_at', { ascending: false })
       .limit(1),
     5000, 'Load last session'
@@ -294,29 +295,164 @@ export async function getLastSession(trainingDayId) {
   return { workout: sessions[0], sets: sets || [] }
 }
 
-// uid passed in from App state — no auth call needed
+// ── Drafts (in-progress workouts) ─────────────────────────────
+//
+// Drafts live as workouts rows with status='in_progress' and the live
+// UI state in workouts.draft_state (JSONB). We never write to
+// workout_sets until the user hits Complete — that keeps history
+// queries clean and preserves the exact strings the user typed
+// (e.g. blank reps stays blank, not "0").
+
+// Returns the in-progress workout for this training day, if any.
+// Shape: { id, day_name, started_at, updated_at, draft_state } | null
+export async function getInProgressWorkout(trainingDayId, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data, error } = await withTimeout(
+    supabase
+      .from('workouts')
+      .select('id, day_name, started_at, updated_at, draft_state')
+      .eq('user_id', uid)
+      .eq('training_day_id', trainingDayId)
+      .eq('status', 'in_progress')
+      .limit(1),
+    5000, 'Load in-progress workout'
+  )
+  if (error) throw new Error(`Load draft failed: ${error.message}`)
+  return data?.[0] || null
+}
+
+// Insert (workoutId omitted) or update (workoutId provided) the draft.
+// draftState is whatever JSON-serialisable shape the caller wants to
+// restore on resume — typically { sets, activityLogs, exerciseList }.
+export async function upsertDraft({ workoutId, trainingDayId, dayLabel, draftState }, uid) {
+  if (!uid) throw new Error('Not authenticated')
+
+  if (workoutId) {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('workouts')
+        .update({ draft_state: draftState, day_name: dayLabel, updated_at: new Date().toISOString() })
+        .eq('id', workoutId)
+        .eq('user_id', uid)
+        .select('id, started_at, updated_at')
+        .single(),
+      5000, 'Save draft'
+    )
+    if (error) throw new Error(`Save draft failed: ${error.message}`)
+    return data
+  }
+
+  const nowIso = new Date().toISOString()
+  const { data, error } = await withTimeout(
+    supabase
+      .from('workouts')
+      .insert({
+        user_id:         uid,
+        training_day_id: trainingDayId,
+        day_name:        dayLabel,
+        status:          'in_progress',
+        started_at:      nowIso,
+        updated_at:      nowIso,
+        draft_state:     draftState,
+      })
+      .select('id, started_at, updated_at')
+      .single(),
+    5000, 'Create draft'
+  )
+  if (error) throw new Error(`Create draft failed: ${error.message}`)
+  return data
+}
+
+// Delete a draft (cascades workout_sets — though drafts shouldn't have any).
+export async function discardDraft(workoutId, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { error } = await withTimeout(
+    supabase
+      .from('workouts')
+      .delete()
+      .eq('id', workoutId)
+      .eq('user_id', uid)
+      .eq('status', 'in_progress'),
+    5000, 'Discard draft'
+  )
+  if (error) throw new Error(`Discard failed: ${error.message}`)
+}
+
+// Returns training_day_ids that have an in-progress workout.
+// Used by Home.jsx to render the "● in progress" indicator.
+export async function getInProgressDayIds(uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data, error } = await withTimeout(
+    supabase
+      .from('workouts')
+      .select('training_day_id')
+      .eq('user_id', uid)
+      .eq('status', 'in_progress'),
+    5000, 'Load in-progress days'
+  )
+  if (error) throw new Error(`Load drafts failed: ${error.message}`)
+  return new Set((data || []).map(r => r.training_day_id))
+}
+
+// Add a single exercise row to an existing training day. Used by the
+// "Also update program" toggle when the user adds an exercise mid-workout.
+export async function addExerciseToProgram(trainingDayId, payload, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data: existing } = await withTimeout(
+    supabase
+      .from('exercises')
+      .select('sort_order')
+      .eq('training_day_id', trainingDayId)
+      .order('sort_order', { ascending: false })
+      .limit(1),
+    5000, 'Load max sort_order'
+  )
+  const nextSort = (existing?.[0]?.sort_order ?? -1) + 1
+  const { error } = await withTimeout(
+    supabase.from('exercises').insert({
+      user_id:         uid,
+      training_day_id: trainingDayId,
+      name:            payload.name,
+      target:          payload.target || '',
+      item_type:       payload.item_type || 'exercise',
+      sort_order:      nextSort,
+      activity_fields: payload.item_type === 'activity' && Array.isArray(payload.activity_fields)
+        ? payload.activity_fields
+        : null,
+    }),
+    5000, 'Add exercise to program'
+  )
+  if (error) throw new Error(`Add to program failed: ${error.message}`)
+}
+
+// Remove an exercise row by name (case-insensitive) from a training day.
+// Used by the "Also update program" toggle when removing mid-workout.
+export async function removeExerciseFromProgram(trainingDayId, exerciseName, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { error } = await withTimeout(
+    supabase
+      .from('exercises')
+      .delete()
+      .eq('training_day_id', trainingDayId)
+      .eq('user_id', uid)
+      .ilike('name', exerciseName),
+    5000, 'Remove from program'
+  )
+  if (error) throw new Error(`Remove from program failed: ${error.message}`)
+}
+
+// Finalize a draft: insert workout_sets from the canonicalized state, then
+// flip the draft row to status='completed'. The draft row was created on
+// entry to WorkoutDay (see upsertDraft) so workoutId always exists.
+//
 // exerciseSets:  { [name]: [{ weight_kg, reps, is_warmup, rir, rpe }] }
 //   weight_kg is already in kg (caller converts from user unit)
 // activityLogs:  { [name]: { checked, notes, duration_min, distance_km,
 //                            intensity, avg_hr, calories, rounds, elevation_m } }
 //   distance/elevation already canonicalized to km/m by caller.
-export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activityLogs, uid) {
+export async function completeWorkout(workoutId, dayLabel, exerciseSets, activityLogs, uid) {
   if (!uid) throw new Error('Not authenticated')
-
-  const { data: workout, error: wErr } = await withTimeout(
-    supabase
-      .from('workouts')
-      .insert({
-        user_id: uid,
-        training_day_id: trainingDayId,
-        day_name: dayLabel,
-        completed_at: new Date().toISOString(),
-      })
-      .select()
-      .single(),
-    5000, 'Save workout'
-  )
-  if (wErr) throw new Error(`Save workout failed: ${wErr.message}`)
+  if (!workoutId) throw new Error('No workout id')
 
   const rowsToInsert = []
 
@@ -330,7 +466,7 @@ export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activit
         const rpe = set.rpe === '' || set.rpe == null ? null : parseFloat(set.rpe)
         rowsToInsert.push({
           user_id:       uid,
-          workout_id:    workout.id,
+          workout_id:    workoutId,
           exercise_name: exerciseName,
           set_number:    idx + 1,
           weight_kg:     isNaN(w) ? 0 : w,
@@ -372,7 +508,7 @@ export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activit
     if (!hasAnyData) continue
     rowsToInsert.push({
       user_id:       uid,
-      workout_id:    workout.id,
+      workout_id:    workoutId,
       exercise_name: activityName,
       set_number:    1,
       weight_kg:     0,
@@ -397,6 +533,25 @@ export async function saveWorkout(trainingDayId, dayLabel, exerciseSets, activit
     if (sErr) throw new Error(`Save sets failed: ${sErr.message}`)
   }
 
+  // Finalize the workout row — flip status, set completed_at, clear draft_state.
+  const completedAt = new Date().toISOString()
+  const { data: workout, error: wErr } = await withTimeout(
+    supabase
+      .from('workouts')
+      .update({
+        status:       'completed',
+        day_name:     dayLabel,
+        completed_at: completedAt,
+        updated_at:   completedAt,
+        draft_state:  null,
+      })
+      .eq('id', workoutId)
+      .eq('user_id', uid)
+      .select()
+      .single(),
+    5000, 'Complete workout'
+  )
+  if (wErr) throw new Error(`Complete workout failed: ${wErr.message}`)
   return workout
 }
 
@@ -457,7 +612,10 @@ export async function getWeeklyProgress(uid) {
       5000, 'Load weekly target'
     ),
     withTimeout(
-      supabase.from('workouts').select('id, day_name').eq('user_id', uid).gte('completed_at', weekStart),
+      supabase.from('workouts').select('id, day_name')
+        .eq('user_id', uid)
+        .eq('status', 'completed')
+        .gte('completed_at', weekStart),
       5000, 'Load week workouts'
     ),
   ])
@@ -501,7 +659,7 @@ export async function saveSettings(fields, uid) {
 export async function getStats() {
   const [workoutsRes, activitiesRes] = await Promise.all([
     withTimeout(
-      supabase.from('workouts').select('*', { count: 'exact', head: true }),
+      supabase.from('workouts').select('*', { count: 'exact', head: true }).eq('status', 'completed'),
       5000, 'Load stats'
     ),
     withTimeout(
@@ -524,6 +682,7 @@ export async function getPreviousSessionVolume(trainingDayId, excludeWorkoutId) 
       .from('workouts')
       .select('id, completed_at')
       .eq('training_day_id', trainingDayId)
+      .eq('status', 'completed')
       .neq('id', excludeWorkoutId)
       .order('completed_at', { ascending: false })
       .limit(1),

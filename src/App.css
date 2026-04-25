@@ -2137,3 +2137,167 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Drafts: resume banner, +Add exercise, modals ────── */
+.resume-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface2);
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.resume-banner-x {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.add-exercise-btn {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  margin-top: 4px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.add-exercise-btn:active { opacity: 0.7; }
+
+.ex-remove-btn {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 6px;
+  cursor: pointer;
+}
+.ex-remove-btn:active { color: var(--danger); }
+
+.activity-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.activity-row-wrap .activity-row { flex: 1; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 0.5px;
+  color: var(--text);
+  margin: 0;
+}
+.modal-body { font-size: 14px; color: var(--text-dim); line-height: 1.4; }
+.modal-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.modal-checkbox input { width: 16px; height: 16px; }
+.modal-actions { display: flex; gap: 8px; margin-top: 4px; }
+.modal-btn-primary,
+.modal-btn-cancel,
+.modal-btn-danger {
+  flex: 1;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 0;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+.modal-btn-primary { background: var(--accent); color: #fff; }
+.modal-btn-cancel  { background: var(--surface3); color: var(--text); }
+.modal-btn-danger  { background: var(--danger); color: #fff; }
+
+.picker-type-row { display: flex; gap: 8px; }
+.picker-type-chip {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+.picker-type-chip--on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--surface3);
+}
+
+.resume-banner-btns { display: flex; align-items: center; gap: 8px; }
+.resume-banner-discard {
+  background: transparent;
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+.resume-banner-discard:active { opacity: 0.7; }
+
+.day-card { position: relative; }
+.day-card__draft-dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 6px var(--cyan);
+  z-index: 2;
+}
+
+.makeup-sheet__discard {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+.makeup-sheet__discard:active { background: rgba(239, 68, 68, 0.1); }
