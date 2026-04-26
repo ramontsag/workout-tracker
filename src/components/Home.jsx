@@ -295,6 +295,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
             const typeClass     = isEmpty ? 'day-card--empty' : isGymDay ? 'day-card--gym' : 'day-card--rest'
             const indicatorType = isEmpty ? 'empty' : isGymDay ? 'gym' : 'rest'
             const hasDraft      = draftDayIds.has(day.id)
+            const isDone        = !!weeklyProgress?.completedDayIds?.includes(day.id)
 
             return (
               <div
@@ -308,6 +309,9 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
               >
                 {hasDraft && (
                   <span className="day-card__draft-dot" title="Unfinished workout" aria-label="In progress" />
+                )}
+                {isDone && (
+                  <span className="day-card__done-mark" title="Completed this week" aria-label="Completed">✓</span>
                 )}
                 {isToday && (
                   <div className={`day-card__stripe day-card__stripe--${indicatorType}`}>
@@ -329,11 +333,11 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                   </div>
                 </div>
                 <button
-                  className="day-card__gear"
+                  className={`day-card__edit day-card__edit--${indicatorType}`}
                   onClick={(e) => { e.stopPropagation(); setEditDay(day) }}
                   aria-label={`Edit ${day.name}`}
                   title="Edit day"
-                >⚙</button>
+                >Edit</button>
               </div>
             )
           })}

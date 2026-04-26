@@ -3,7 +3,7 @@ import {
   getLastSession, completeWorkout, getPreviousSessionVolume, saveTemplate, getExerciseBests,
   getInProgressWorkout, upsertDraft, discardDraft,
   addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames,
-  updateDayMeta,
+  updateDayMeta, deleteCustomItem,
 } from '../supabase'
 import {
   displayWeight, parseInputWeight, unitLabel,
@@ -14,6 +14,7 @@ import { DEFAULT_ACTIVITY_FIELDS } from '../data/commonActivities'
 import { useRestTimer } from '../useRestTimer'
 import CatalogPickerModal from './CatalogPickerModal'
 import EditDayModal from './EditDayModal'
+import RestPickerSheet from './RestPickerSheet'
 import { EXERCISE_CATALOG } from '../data/exerciseCatalog'
 import { ACTIVITY_CATALOG } from '../data/activityCatalog'
 
@@ -588,6 +589,7 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   const [removeTarget,  setRemoveTarget]  = useState(null)  // { name, alsoProgram }
   const [editDayOpen,   setEditDayOpen]   = useState(false)
   const [menuOpen,      setMenuOpen]      = useState(false)
+  const [restPickerOpen, setRestPickerOpen] = useState(false)
 
   // PR tracking — exerciseBests: historical bests per exercise from DB
   //   { [name]: { bestE1RM, bestWeight, maxRepsAtWeight: {kg->reps} } }
@@ -1106,33 +1108,18 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           </div>
         </header>
 
-        {/* Rest stepper — bumps day.rest_seconds by 15s and persists on change */}
+        {/* Rest preset picker — tap to open a sheet of values */}
         <div className="workout-controls-row">
-          <div className="rest-stepper rest-stepper--inline">
-            <button
-              type="button"
-              className="set-count-btn"
-              onClick={() => {
-                const next = Math.max(30, restSeconds - 15)
-                onProgramUpdated && updateDayMeta(day.id, { rest_seconds: next }, userId)
-                  .then(onProgramUpdated)
-                  .catch(e => setErrMsg(e.message))
-              }}
-              aria-label="Less rest"
-            >−</button>
-            <span className="rest-stepper-val">{`Rest ${formatRestShort(restSeconds)}`}</span>
-            <button
-              type="button"
-              className="set-count-btn"
-              onClick={() => {
-                const next = Math.min(600, restSeconds + 15)
-                onProgramUpdated && updateDayMeta(day.id, { rest_seconds: next }, userId)
-                  .then(onProgramUpdated)
-                  .catch(e => setErrMsg(e.message))
-              }}
-              aria-label="More rest"
-            >+</button>
-          </div>
+          <button
+            type="button"
+            className="rest-picker-trigger"
+            onClick={() => setRestPickerOpen(true)}
+            title="Change rest duration"
+          >
+            <span className="rest-picker-trigger-label">Rest</span>
+            <span className="rest-picker-trigger-val">{formatRestShort(restSeconds)}</span>
+            <span className="rest-picker-trigger-chev">▾</span>
+          </button>
           <span className={`rest-timer-flag${timerEnabled ? '' : ' rest-timer-flag--off'}`}>
             {timerEnabled ? 'Timer on' : 'Timer off'}
           </span>
@@ -1327,6 +1314,12 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           createLabel={pickerKind === 'activity' ? '+ Create your own activity' : '+ Create your own exercise'}
           createPlaceholder={pickerKind === 'activity' ? 'Activity name' : 'Exercise name'}
           yourGroupLabel={pickerKind === 'activity' ? 'Your activities' : 'Your exercises'}
+          onDeleteCustom={async (name) => {
+            await deleteCustomItem(name, userId)
+            setKnownNames(prev => prev.filter(n => n.toLowerCase() !== name.toLowerCase()))
+            // If the deleted name is currently in the workout, drop it.
+            setExerciseList(prev => prev.filter(e => e.name !== name))
+          }}
         />
       )}
 
@@ -1341,6 +1334,18 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           onSaved={onProgramUpdated}
         />
       )}
+
+      {/* Rest preset sheet */}
+      <RestPickerSheet
+        open={restPickerOpen}
+        value={restSeconds}
+        onClose={() => setRestPickerOpen(false)}
+        onPick={(seconds) => {
+          updateDayMeta(day.id, { rest_seconds: seconds }, userId)
+            .then(() => onProgramUpdated && onProgramUpdated())
+            .catch(e => setErrMsg(e.message))
+        }}
+      />
 
       {/* ── Remove exercise confirm ──────────────────────── */}
       {removeTarget && (

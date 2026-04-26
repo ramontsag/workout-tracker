@@ -28,10 +28,10 @@ export default function App() {
   const screenRef = useRef('loading')
   const go = (s) => { screenRef.current = s; setScreen(s) }
 
+  // Bootstrap path — used on initial sign-in. Seeds an empty 7-day program
+  // for fresh accounts and navigates to home.
   const loadProgram = useCallback(async (uid) => {
     try {
-      // Auto-seed 7 empty days for fresh accounts so they land on home
-      // with the same UI as everyone else (gear icon to edit each day).
       if (uid) {
         try { await seedProgramIfMissing(uid) } catch (e) { console.warn('[App] seed failed:', e.message) }
       }
@@ -43,6 +43,17 @@ export default function App() {
       go('home')
     }
   }, []) // eslint-disable-line
+
+  // Pure refetch — used after edits (rest stepper, EditDayModal save). Does
+  // NOT navigate, so the user stays where they are.
+  const refreshProgram = useCallback(async () => {
+    try {
+      const days = await getProgram()
+      setProgram(days)
+    } catch (err) {
+      console.warn('[App] refreshProgram failed:', err.message)
+    }
+  }, [])
 
   const loadProfile = useCallback(async () => {
     try {
@@ -135,7 +146,7 @@ export default function App() {
           profile={profile}
           onBack={() => { setActiveDay(null); go('home') }}
           onHistory={exercise => { setActiveExercise(exercise); go('history') }}
-          onProgramUpdated={() => loadProgram(user?.id)}
+          onProgramUpdated={refreshProgram}
         />
       )
     }
@@ -170,7 +181,7 @@ export default function App() {
           user={user}
           program={program}
           onBack={() => go('profile')}
-          onProgramUpdated={loadProgram}
+          onProgramUpdated={refreshProgram}
         />
       )
     }
@@ -193,7 +204,7 @@ export default function App() {
         profile={profile}
         onSelectDay={day => { setActiveDay(day); go('workout') }}
         onProfile={() => go('profile')}
-        onProgramUpdated={() => loadProgram(user?.id)}
+        onProgramUpdated={refreshProgram}
       />
     )
   }

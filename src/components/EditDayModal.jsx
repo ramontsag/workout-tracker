@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { saveProgram, getAllKnownExerciseNames } from '../supabase'
+import { saveProgram, getAllKnownExerciseNames, deleteCustomItem } from '../supabase'
 import {
   FIELD_CATALOG, DEFAULT_ACTIVITY_FIELDS, defaultFieldsFor,
 } from '../data/commonActivities'
 import { EXERCISE_CATALOG } from '../data/exerciseCatalog'
 import { ACTIVITY_CATALOG } from '../data/activityCatalog'
-import { DAY_COLORS } from '../data/defaultProgram'
 import CatalogPickerModal from './CatalogPickerModal'
+import RestPickerSheet from './RestPickerSheet'
 
 // Per-day editor sheet. Replaces the old Edit Program screen.
 // Reachable from: each day's gear icon on Home, the gear icon in the
@@ -25,6 +25,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   // Local working copy — mutated freely until Save.
   const [draft, setDraft] = useState(() => cloneDay(day))
   const [pickerKind, setPickerKind] = useState(null)  // null | 'exercise' | 'activity'
+  const [restPickerOpen, setRestPickerOpen] = useState(false)
   const [knownNames, setKnownNames] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
@@ -155,36 +156,16 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
             placeholder="e.g. Chest & Back"
           />
 
-          {/* Color */}
-          <label className="field-label" style={{ marginTop: 14 }}>Color</label>
-          <div className="color-swatches">
-            {DAY_COLORS.map(c => (
-              <button
-                key={c}
-                type="button"
-                className={`color-swatch${draft.color === c ? ' color-swatch--on' : ''}`}
-                style={{ background: c }}
-                onClick={() => update('color', c)}
-                aria-label={`Color ${c}`}
-              />
-            ))}
-          </div>
-
-          {/* Rest seconds */}
+          {/* Rest between sets — preset picker */}
           <label className="field-label" style={{ marginTop: 14 }}>Rest between sets</label>
-          <div className="rest-stepper">
-            <button
-              type="button"
-              className="set-count-btn"
-              onClick={() => update('rest_seconds', Math.max(30, (draft.rest_seconds ?? 90) - 15))}
-            >−</button>
-            <span className="rest-stepper-val">{formatRest(draft.rest_seconds ?? 90)}</span>
-            <button
-              type="button"
-              className="set-count-btn"
-              onClick={() => update('rest_seconds', Math.min(600, (draft.rest_seconds ?? 90) + 15))}
-            >+</button>
-          </div>
+          <button
+            type="button"
+            className="rest-picker-trigger"
+            onClick={() => setRestPickerOpen(true)}
+          >
+            <span className="rest-picker-trigger-val">{formatRest(draft.rest_seconds ?? 90)}</span>
+            <span className="rest-picker-trigger-chev">▾</span>
+          </button>
 
           {/* Items list */}
           <label className="field-label" style={{ marginTop: 18 }}>
@@ -286,8 +267,22 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
           createLabel={pickerCreate}
           createPlaceholder={pickerKind === 'activity' ? 'Activity name' : 'Exercise name'}
           yourGroupLabel={pickerYour}
+          onDeleteCustom={async (name) => {
+            await deleteCustomItem(name, userId)
+            // Drop the deleted name from the local list so the UI updates instantly.
+            setKnownNames(prev => prev.filter(n => n.toLowerCase() !== name.toLowerCase()))
+            // Also remove it from the current draft if present.
+            setDraft(prev => ({ ...prev, exercises: prev.exercises.filter(e => e.name !== name) }))
+          }}
         />
       )}
+
+      <RestPickerSheet
+        open={restPickerOpen}
+        value={draft.rest_seconds ?? 90}
+        onClose={() => setRestPickerOpen(false)}
+        onPick={(seconds) => update('rest_seconds', seconds)}
+      />
     </div>
   )
 }

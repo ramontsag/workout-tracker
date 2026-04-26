@@ -18,6 +18,8 @@ import React, { useState, useMemo } from 'react'
 //   - createLabel?: string                    default "+ Create your own"
 //   - createPlaceholder?: string              default "Name"
 //   - yourGroupLabel?: string                 default "Your items"
+//   - onDeleteCustom?: (name: string) => Promise<void>   if provided, items
+//       in the "Your X" group get a × delete affordance with confirm.
 export default function CatalogPickerModal({
   open, onClose, onPick,
   catalog,
@@ -27,10 +29,12 @@ export default function CatalogPickerModal({
   createLabel       = '+ Create your own',
   createPlaceholder = 'Name',
   yourGroupLabel    = 'Your items',
+  onDeleteCustom    = null,
 }) {
   const [query, setQuery] = useState('')
   const [openGroup, setOpenGroup] = useState(null)
   const [creatingName, setCreatingName] = useState(null)  // null | string
+  const [confirmDelete, setConfirmDelete] = useState(null) // null | name
 
   const existingLower = useMemo(
     () => new Set(existingNames.map(n => (n || '').toLowerCase())),
@@ -129,6 +133,7 @@ export default function CatalogPickerModal({
           {filtered.map(g => {
             const isOpen = q ? true : openGroup === g.group
             const totalItems = g.subgroups.reduce((n, sg) => n + sg.items.length, 0)
+            const isYourGroup = g.group === yourGroupLabel
             return (
               <div key={g.group} className="picker-group">
                 <button
@@ -146,17 +151,27 @@ export default function CatalogPickerModal({
                         {sg.name && <div className="picker-subgroup-name">{sg.name}</div>}
                         {sg.items.map(name => {
                           const taken = existingLower.has(name.toLowerCase())
+                          const canDelete = isYourGroup && !!onDeleteCustom
                           return (
-                            <button
-                              key={name}
-                              className={`picker-item${taken ? ' picker-item--taken' : ''}`}
-                              onClick={() => !taken && handlePick(name)}
-                              disabled={taken}
-                              title={taken ? 'Already on this day' : ''}
-                            >
-                              {name}
-                              {taken && <span className="picker-item-taken-tag">already on day</span>}
-                            </button>
+                            <div key={name} className="picker-item-row">
+                              <button
+                                className={`picker-item${taken ? ' picker-item--taken' : ''}`}
+                                onClick={() => !taken && handlePick(name)}
+                                disabled={taken}
+                                title={taken ? 'Already on this day' : ''}
+                              >
+                                {name}
+                                {taken && <span className="picker-item-taken-tag">already on day</span>}
+                              </button>
+                              {canDelete && (
+                                <button
+                                  className="picker-item-delete"
+                                  onClick={(e) => { e.stopPropagation(); setConfirmDelete(name) }}
+                                  aria-label={`Delete ${name}`}
+                                  title="Delete this custom item and its history"
+                                >×</button>
+                              )}
+                            </div>
                           )
                         })}
                       </div>
@@ -194,6 +209,30 @@ export default function CatalogPickerModal({
           )}
         </div>
       </div>
+
+      {confirmDelete && (
+        <div className="confirm-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="confirm-card" onClick={e => e.stopPropagation()}>
+            <div className="confirm-title">Delete "{confirmDelete}"?</div>
+            <p className="confirm-body">
+              This will remove it from your program AND every workout entry you've ever logged for it. This can't be undone.
+            </p>
+            <div className="confirm-actions">
+              <button
+                className="confirm-danger"
+                onClick={async () => {
+                  try { await onDeleteCustom(confirmDelete) } catch {}
+                  setConfirmDelete(null)
+                }}
+              >Delete forever</button>
+              <button
+                className="confirm-cancel"
+                onClick={() => setConfirmDelete(null)}
+              >Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

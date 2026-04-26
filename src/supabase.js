@@ -125,6 +125,27 @@ export async function seedProgramIfMissing(uid) {
   if (insErr) throw new Error(`Seed program failed: ${insErr.message}`)
 }
 
+// Delete a user's custom exercise (or activity) by name. Removes the program
+// rows AND every workout_sets row referencing that name, so the name fully
+// disappears from autocomplete and history. Catalog names are not affected
+// — they live in code, not the DB.
+export async function deleteCustomItem(name, uid) {
+  if (!uid)  throw new Error('Not authenticated')
+  if (!name) throw new Error('No name')
+  const trimmed = name.trim()
+  // workout_sets first so history is gone before the program reference drops.
+  const r1 = await withTimeout(
+    supabase.from('workout_sets').delete().eq('user_id', uid).eq('exercise_name', trimmed),
+    5000, 'Delete history'
+  )
+  if (r1.error) throw new Error(`Delete history failed: ${r1.error.message}`)
+  const r2 = await withTimeout(
+    supabase.from('exercises').delete().eq('user_id', uid).eq('name', trimmed),
+    5000, 'Delete program rows'
+  )
+  if (r2.error) throw new Error(`Delete program rows failed: ${r2.error.message}`)
+}
+
 // Partial UPDATE on a single training_day row. Used by EditDayModal and the
 // mid-workout rest stepper. Cheaper than calling saveProgram for tiny edits.
 export async function updateDayMeta(dayId, fields, uid) {
@@ -673,7 +694,7 @@ export async function getWeeklyProgress(uid) {
       5000, 'Load weekly target'
     ),
     withTimeout(
-      supabase.from('workouts').select('id, day_name')
+      supabase.from('workouts').select('id, day_name, training_day_id')
         .eq('user_id', uid)
         .eq('status', 'completed')
         .gte('completed_at', weekStart),
@@ -688,8 +709,18 @@ export async function getWeeklyProgress(uid) {
   const weekWorkouts = weekWorkoutsRes.data || []
   const workoutCount = weekWorkouts.length
 
+  // Training day ids of all completed workouts this week — Home uses this to
+  // mark each day card with a ✓.
+  const completedDayIds = weekWorkouts
+    .map(w => w.training_day_id)
+    .filter(Boolean)
+
   // Each completed session = 1 unit of progress, regardless of what's inside it
-  return { completed: workoutCount, target, workouts: workoutCount, activities: 0 }
+  return {
+    completed: workoutCount, target,
+    workouts: workoutCount, activities: 0,
+    completedDayIds,
+  }
 }
 
 // Upserts weekly_target on the current user's profile row. Upsert (not
