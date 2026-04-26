@@ -320,7 +320,15 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                   </div>
                 )}
                 <div className="day-card__content">
-                  <div className="day-card__name">{day.name}</div>
+                  <div className="day-card__name-row">
+                    <div className="day-card__name">{day.name}</div>
+                    <button
+                      className={`day-card__edit day-card__edit--${indicatorType}`}
+                      onClick={(e) => { e.stopPropagation(); setEditDay(day) }}
+                      aria-label={`Edit ${day.name}`}
+                      title="Edit day"
+                    >Edit</button>
+                  </div>
                   {day.focus
                     ? <div className="day-card__focus">{day.focus}</div>
                     : (!isGymDay && !isEmpty && <div className="day-card__focus">rest / move</div>)
@@ -332,12 +340,6 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                     <div className="day-card__indicator-dash" />
                   </div>
                 </div>
-                <button
-                  className={`day-card__edit day-card__edit--${indicatorType}`}
-                  onClick={(e) => { e.stopPropagation(); setEditDay(day) }}
-                  aria-label={`Edit ${day.name}`}
-                  title="Edit day"
-                >Edit</button>
               </div>
             )
           })}

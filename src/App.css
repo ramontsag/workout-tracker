@@ -2840,13 +2840,16 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .resume-banner-discard:active { opacity: 0.7; }
 
 .day-card { position: relative; }
+.day-card__name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.day-card__name-row .day-card__name { flex: 0 0 auto; }
 .day-card__edit {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  padding: 4px 10px;
+  padding: 3px 10px;
   border-radius: 99px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.4px;
   text-transform: uppercase;
@@ -2856,6 +2859,7 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   border: 1px solid transparent;
   background: rgba(0, 0, 0, 0.22);
   color: var(--text-muted);
+  line-height: 1.2;
 }
 .day-card__edit:active { transform: scale(0.94); }
 .day-card__edit--gym {
