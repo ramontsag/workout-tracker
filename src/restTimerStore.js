@@ -77,7 +77,15 @@ export function subscribe(fn) {
 }
 
 function notify() {
-  for (const fn of listeners) fn(getState())
+  const state = getState()
+  for (const fn of listeners) fn(state)
+  // Stop ticking once the timer reaches zero — saves CPU and avoids
+  // re-rendering subscribers every 250ms forever. start() will call
+  // ensureTicking() to resume on the next set.
+  if (!state.active && intervalId) {
+    clearInterval(intervalId)
+    intervalId = null
+  }
 }
 
 function ensureTicking() {

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { saveProgram, getAllKnownExerciseNames } from '../supabase'
-import { DEFAULT_DAYS, EMPTY_DAYS, OWNER_EMAIL } from '../data/defaultProgram'
+import { EMPTY_DAYS } from '../data/defaultProgram'
 import {
   CURATED_ACTIVITIES, FIELD_CATALOG, defaultFieldsFor, DEFAULT_ACTIVITY_FIELDS,
 } from '../data/commonActivities'
-import { EXERCISE_CATALOG, CATALOG_NAMES } from '../data/exerciseCatalog'
+import { CATALOG_NAMES } from '../data/exerciseCatalog'
 import ExercisePickerModal from './ExercisePickerModal'
 
 // ─────────────────────────────────────────────────────────────
@@ -227,11 +227,9 @@ function DayCard({
 const WEEKDAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
 
 export default function ProgramSetup({ userId, userEmail, initialDays, isEditing, onComplete, onBack }) {
-  // Fresh accounts: owner gets the personal default, everyone else starts blank.
-  const fallback = (userEmail || '').toLowerCase() === OWNER_EMAIL.toLowerCase()
-    ? DEFAULT_DAYS
-    : EMPTY_DAYS
-  const seed = (initialDays?.length > 0 ? initialDays : fallback)
+  // Every account starts with a blank 7-day template — users fill it from the
+  // catalog or by creating their own exercises.
+  const seed = (initialDays?.length > 0 ? initialDays : EMPTY_DAYS)
     .filter(d => WEEKDAYS.includes(d.name))
     .sort((a, b) => WEEKDAYS.indexOf(a.name) - WEEKDAYS.indexOf(b.name))
 
@@ -436,15 +434,16 @@ export default function ProgramSetup({ userId, userEmail, initialDays, isEditing
           />
         ))}
 
-        <ExercisePickerModal
-          open={pickerForDay !== null}
-          onClose={() => setPickerForDay(null)}
-          onPick={(name) => {
-            if (pickerForDay !== null) addItemWithName(pickerForDay, name)
-          }}
-          userKnownNames={knownNames}
-          existingNames={pickerForDay !== null ? days[pickerForDay].exercises.map(e => e.name) : []}
-        />
+        {/* Mount only when open so search input + state reset on each open. */}
+        {pickerForDay !== null && (
+          <ExercisePickerModal
+            open
+            onClose={() => setPickerForDay(null)}
+            onPick={(name) => addItemWithName(pickerForDay, name)}
+            userKnownNames={knownNames}
+            existingNames={days[pickerForDay].exercises.map(e => e.name)}
+          />
+        )}
 
         {error && <p className="err-msg">{error}</p>}
         <button className="complete-btn" style={{ marginTop: 8 }} onClick={handleSave} disabled={saving}>

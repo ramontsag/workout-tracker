@@ -92,7 +92,8 @@ export async function resetPassword(email) {
 
 export async function getProfile() {
   const { data, error } = await withTimeout(
-    supabase.from('profiles').select('*').single(),
+    // maybeSingle so a missing row doesn't throw — caller treats null as defaults.
+    supabase.from('profiles').select('*').maybeSingle(),
     5000, 'Load profile'
   )
   if (error) return null
@@ -656,13 +657,14 @@ export async function getWeeklyProgress(uid) {
   return { completed: workoutCount, target, workouts: workoutCount, activities: 0 }
 }
 
-// Updates weekly_target on the current user's profile row.
-// Requires uid so we can provide an explicit filter — Supabase JS v2 rejects
-// filterless updates as a safety guard even when RLS would scope them correctly.
+// Upserts weekly_target on the current user's profile row. Upsert (not
+// update) so that accounts whose profile row was never created — e.g. older
+// signups before the auto-create trigger existed — get one on first edit
+// instead of the change silently 0-rowing.
 export async function saveWeeklyTarget(target, uid) {
   if (!uid) throw new Error('Not authenticated')
   const { error } = await withTimeout(
-    supabase.from('profiles').update({ weekly_target: target }).eq('id', uid),
+    supabase.from('profiles').upsert({ id: uid, weekly_target: target }, { onConflict: 'id' }),
     5000, 'Save weekly target'
   )
   if (error) throw new Error(`Save target failed: ${error.message}`)
@@ -670,10 +672,11 @@ export async function saveWeeklyTarget(target, uid) {
 
 // Generic settings updater. `fields` is a partial profile object, e.g.
 // { weight_unit: 'lbs' } or { intensity_mode: 'rir', weight_unit: 'kg' }.
+// Upsert so a missing profile row gets created on first save.
 export async function saveSettings(fields, uid) {
   if (!uid) throw new Error('Not authenticated')
   const { error } = await withTimeout(
-    supabase.from('profiles').update(fields).eq('id', uid),
+    supabase.from('profiles').upsert({ id: uid, ...fields }, { onConflict: 'id' }),
     5000, 'Save settings'
   )
   if (error) throw new Error(`Save settings failed: ${error.message}`)

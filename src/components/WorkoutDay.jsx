@@ -1083,7 +1083,7 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
           </button>
         </header>
 
-        {restTimer.total > 0 && (
+        {restTimer.active && (
           <RestTimer
             onDismiss={restTimer.stop}
             onReset={restTimer.reset}
