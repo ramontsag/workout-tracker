@@ -9,6 +9,7 @@ import ProfileScreen   from './components/ProfileScreen'
 import ProgressScreen  from './components/ProgressScreen'
 import ArchivesScreen  from './components/ArchivesScreen'
 import SettingsScreen  from './components/SettingsScreen'
+import FloatingTimer   from './components/FloatingTimer'
 
 // Screens: loading → auth → setup → home
 //          home → workout → history → workout
@@ -86,108 +87,127 @@ export default function App() {
     return () => { clearTimeout(fallback); subscription.unsubscribe() }
   }, [loadProgram, loadProfile]) // eslint-disable-line
 
+  // Tap on the floating timer pill — jumps back to the day that started it.
+  // If activeDay was cleared (user fully navigated home), look up the day in
+  // the program by the id stored alongside the timer.
+  const handleFloatingTimerTap = (dayId) => {
+    if (activeDay && (!dayId || activeDay.id === dayId)) { go('workout'); return }
+    const day = dayId ? program.find(d => d.id === dayId) : null
+    if (day) { setActiveDay(day); go('workout') }
+    else if (activeDay) go('workout')
+  }
+
   // ── Render ────────────────────────────────────────────────────
+  const renderScreen = () => {
+    if (screen === 'loading') {
+      return (
+        <div className="splash">
+          <div className="splash-logo">💪</div>
+          <div className="splash-text">Loading…</div>
+        </div>
+      )
+    }
+    if (screen === 'auth') return <AuthScreen />
 
-  if (screen === 'loading') {
+    if (screen === 'setup') {
+      return (
+        <ProgramSetup
+          userId={user?.id}
+          userEmail={user?.email}
+          initialDays={program.length > 0 ? program : null}
+          isEditing={program.length > 0}
+          onComplete={loadProgram}
+          onBack={program.length > 0 ? () => go('home') : null}
+        />
+      )
+    }
+
+    if (screen === 'history' && activeExercise) {
+      return (
+        <ExerciseHistory
+          exercise={activeExercise}
+          profile={profile}
+          onBack={() => go('workout')}
+        />
+      )
+    }
+
+    if (screen === 'workout' && activeDay) {
+      return (
+        <WorkoutDay
+          day={activeDay}
+          userId={user?.id}
+          profile={profile}
+          onBack={() => { setActiveDay(null); go('home') }}
+          onHistory={exercise => { setActiveExercise(exercise); go('history') }}
+        />
+      )
+    }
+
+    if (screen === 'profile') {
+      return (
+        <ProfileScreen
+          user={user}
+          totalWorkouts={totalWorkouts}
+          totalActivities={totalActivities}
+          onBack={() => go('home')}
+          onEditProgram={() => go('setup')}
+          onProgress={() => go('progress')}
+          onArchives={() => go('archives')}
+          onSettings={() => go('settings')}
+        />
+      )
+    }
+
+    if (screen === 'progress') {
+      return (
+        <ProgressScreen
+          user={user}
+          profile={profile}
+          onBack={() => go('profile')}
+        />
+      )
+    }
+
+    if (screen === 'archives') {
+      return (
+        <ArchivesScreen
+          user={user}
+          program={program}
+          onBack={() => go('profile')}
+          onProgramUpdated={loadProgram}
+        />
+      )
+    }
+
+    if (screen === 'settings') {
+      return (
+        <SettingsScreen
+          user={user}
+          profile={profile}
+          onBack={() => go('profile')}
+          onProfileUpdated={setProfile}
+        />
+      )
+    }
+
     return (
-      <div className="splash">
-        <div className="splash-logo">💪</div>
-        <div className="splash-text">Loading…</div>
-      </div>
-    )
-  }
-
-  if (screen === 'auth') return <AuthScreen />
-
-  if (screen === 'setup') {
-    return (
-      <ProgramSetup
-        userId={user?.id}
-        userEmail={user?.email}
-        initialDays={program.length > 0 ? program : null}
-        isEditing={program.length > 0}
-        onComplete={loadProgram}
-        onBack={program.length > 0 ? () => go('home') : null}
-      />
-    )
-  }
-
-  if (screen === 'history' && activeExercise) {
-    return (
-      <ExerciseHistory
-        exercise={activeExercise}
-        profile={profile}
-        onBack={() => go('workout')}
-      />
-    )
-  }
-
-  if (screen === 'workout' && activeDay) {
-    return (
-      <WorkoutDay
-        day={activeDay}
-        userId={user?.id}
-        profile={profile}
-        onBack={() => { setActiveDay(null); go('home') }}
-        onHistory={exercise => { setActiveExercise(exercise); go('history') }}
-      />
-    )
-  }
-
-  if (screen === 'profile') {
-    return (
-      <ProfileScreen
-        user={user}
-        totalWorkouts={totalWorkouts}
-        totalActivities={totalActivities}
-        onBack={() => go('home')}
-        onEditProgram={() => go('setup')}
-        onProgress={() => go('progress')}
-        onArchives={() => go('archives')}
-        onSettings={() => go('settings')}
-      />
-    )
-  }
-
-  if (screen === 'progress') {
-    return (
-      <ProgressScreen
-        user={user}
-        profile={profile}
-        onBack={() => go('profile')}
-      />
-    )
-  }
-
-  if (screen === 'archives') {
-    return (
-      <ArchivesScreen
-        user={user}
+      <Home
         program={program}
-        onBack={() => go('profile')}
-        onProgramUpdated={loadProgram}
-      />
-    )
-  }
-
-  if (screen === 'settings') {
-    return (
-      <SettingsScreen
-        user={user}
+        userId={user?.id}
         profile={profile}
-        onBack={() => go('profile')}
-        onProfileUpdated={setProfile}
+        onSelectDay={day => { setActiveDay(day); go('workout') }}
+        onProfile={() => go('profile')}
       />
     )
   }
 
   return (
-    <Home
-      program={program}
-      userId={user?.id}
-      profile={profile}
-      onSelectDay={day => { setActiveDay(day); go('workout') }}
-      onProfile={() => go('profile')}
-    />
+    <>
+      {renderScreen()}
+      {screen !== 'workout' && screen !== 'loading' && screen !== 'auth' && (
+        <FloatingTimer onTap={handleFloatingTimerTap} />
+      )}
+    </>
   )
 }

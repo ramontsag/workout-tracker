@@ -10,6 +10,7 @@ import {
   displayElevation, parseInputElevation, elevationUnitLabel,
 } from '../utils/units'
 import { DEFAULT_ACTIVITY_FIELDS } from '../data/commonActivities'
+import { useRestTimer } from '../useRestTimer'
 
 function fmt(val) {
   return val === 0 || val === '0' ? '—' : val
@@ -69,18 +70,14 @@ function buildVolumeMsg(currentVolKg, prev) {
 }
 
 // ── Rest timer ────────────────────────────────────────────────
-// Mounts fresh on each `key` change (parent increments key per set).
-// Counts down from `total`, can be reset or dismissed.
-function RestTimer({ total, onDismiss }) {
-  const [remaining, setRemaining] = useState(total)
+// Reads from the global rest-timer store so the countdown survives
+// navigation, reload, and tab close. Wall-clock based — see restTimerStore.js.
+function RestTimer({ onDismiss, onReset }) {
+  const { remaining, total, active } = useRestTimer()
+  if (total === 0) return null
 
-  useEffect(() => {
-    const id = setInterval(() => setRemaining(r => Math.max(0, r - 1)), 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  const done = remaining === 0
-  const pct  = (remaining / total) * 100
+  const done = !active
+  const pct  = total > 0 ? (remaining / total) * 100 : 0
   const mins = Math.floor(remaining / 60)
   const secs = remaining % 60
   const label = done
@@ -96,7 +93,7 @@ function RestTimer({ total, onDismiss }) {
           {done ? `Rest done — ${label}` : `Rest  ${label}`}
         </span>
         <div className="rest-timer-btns">
-          <button className="rest-timer-btn" onClick={() => setRemaining(total)} title="Reset">↺</button>
+          <button className="rest-timer-btn" onClick={onReset} title="Reset">↺</button>
           <button className="rest-timer-btn" onClick={onDismiss} title="Dismiss">×</button>
         </div>
       </div>
@@ -185,7 +182,7 @@ function ExerciseCard({
       <div className="ex-header">
         <div className="ex-header__left">
           <div className="ex-header__name-row">
-            <button className="ex-name" onClick={onHistory}>{exercise.name}</button>
+            <span className="ex-name">{exercise.name}</span>
             {prog && <span className={`ex-progress ${prog.cls}`}>{prog.label}</span>}
           </div>
           {exercise.target && <div className="ex-target">{exercise.target}</div>}
@@ -456,12 +453,52 @@ function ActivityCard({ item, log, unit, lastLog, onToggle, onUpdate, onRemoveEx
   )
 }
 
+// ── Check-only exercise card ──────────────────────────────────
+// Same shape as ExerciseCard but with checkboxes per set instead of
+// weight/reps inputs. Used for finishers, bodyweight accessories, or
+// anything the user just wants to check off without tracking load.
+function CheckCard({ exercise, sets, onToggleCheck, onHistory, onRemoveExercise }) {
+  return (
+    <div className="ex-card">
+      <div className="ex-header">
+        <div className="ex-header__left">
+          <div className="ex-header__name-row">
+            <span className="ex-name">{exercise.name}</span>
+          </div>
+          {exercise.target && <div className="ex-target">{exercise.target}</div>}
+        </div>
+        <button className="ex-history-btn" onClick={onHistory} title="View history">↗</button>
+        {onRemoveExercise && (
+          <button className="ex-remove-btn" onClick={onRemoveExercise} title="Remove from this workout" aria-label="Remove exercise">×</button>
+        )}
+      </div>
+
+      <div className="check-list">
+        {sets.map((set, idx) => (
+          <button
+            key={idx}
+            type="button"
+            className={`check-row${set.checked ? ' check-row--done' : ''}`}
+            onClick={() => onToggleCheck(idx)}
+          >
+            <span className="check-num">{idx + 1}</span>
+            <span className={`check-box${set.checked ? ' check-box--done' : ''}`}>
+              {set.checked && <span className="check-mark">✓</span>}
+            </span>
+            <span className="check-label">{set.checked ? 'Done' : 'Tap to check'}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────
 export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) {
   const unit          = profile?.weight_unit    || 'kg'
   const intensityMode = profile?.intensity_mode || 'off'
 
-  const makeEmptySet = () => ({ weight: '', reps: '', done: false, is_warmup: false, rir: '', rpe: '' })
+  const makeEmptySet = () => ({ weight: '', reps: '', done: false, is_warmup: false, rir: '', rpe: '', checked: false })
   // Activity log shape includes display-unit fields for distance/elevation
   // (distance_display, elevation_display) — we convert to canonical km/m at
   // save time so the DB always stores metric.
@@ -489,7 +526,14 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
       ? cached.sets
       : Object.fromEntries(
           day.exercises.filter(e => e.item_type !== 'activity')
-            .map(ex => [ex.name, [makeEmptySet(), makeEmptySet()]])
+            .map(ex => {
+              // Check-mode exercises start with set_count empty rows (default 1).
+              if (ex.track_mode === 'check') {
+                const n = Math.max(1, ex.set_count ?? 1)
+                return [ex.name, Array.from({ length: n }, () => makeEmptySet())]
+              }
+              return [ex.name, [makeEmptySet(), makeEmptySet()]]
+            })
         )
   )
   const [activityLogs, setActivityLogs] = useState(() =>
@@ -505,10 +549,9 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
   const [status,      setStatus]      = useState('idle') // idle | saving | saved
   const [errMsg,      setErrMsg]      = useState('')
   const [volumeMsg,   setVolumeMsg]   = useState('')
-  const [timerKey,     setTimerKey]    = useState(0)
-  const [timerActive,  setTimerActive] = useState(false)
   const [timerEnabled, setTimerEnabled] = useState(true)
   const restSeconds = day.rest_seconds ?? 90
+  const restTimer = useRestTimer()
 
   // save-workout state
   const [archiveStep,  setArchiveStep]  = useState(null)  // null | 'naming' | 'saving' | 'done' | 'limit'
@@ -590,12 +633,17 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
     setDraftLoaded(true)
   }
 
-  // Pre-fill set count from last session once it loads (only on untouched sets)
+  // Pre-fill set count from last session once it loads (only on untouched sets).
+  // Check-mode exercises keep their fixed set_count and are skipped.
   useEffect(() => {
     if (!lastSession) return
+    const checkModeNames = new Set(
+      exerciseList.filter(e => e.item_type === 'exercise' && e.track_mode === 'check').map(e => e.name)
+    )
     setSets(prev => {
       const next = { ...prev }
       for (const [exName, currentSets] of Object.entries(prev)) {
+        if (checkModeNames.has(exName)) continue
         const untouched = currentSets.every(s => s.weight === '' && s.reps === '')
         if (!untouched) continue
         const prevCount = lastSession.sets.filter(s => s.exercise_name === exName).length
@@ -606,7 +654,7 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
       }
       return next
     })
-  }, [lastSession])
+  }, [lastSession]) // eslint-disable-line
 
   // Load historical PR stats — refetch when the live exercise list changes
   // so mid-workout additions also get PR detection.
@@ -684,7 +732,7 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
   // add/remove counts as "changed" too.
   const stateHasContent = (s, a, el) => {
     if (Object.values(s).some(arr => arr.some(r =>
-        r.weight !== '' || r.reps !== '' || r.is_warmup ||
+        r.weight !== '' || r.reps !== '' || r.is_warmup || r.checked ||
         (r.rir !== '' && r.rir != null) || (r.rpe !== '' && r.rpe != null)
     ))) return true
     if (Object.values(a).some(l =>
@@ -768,10 +816,7 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
       ...prev,
       [exName]: prev[exName].map((s, i) => i === idx ? { ...s, done: true } : s),
     }))
-    if (timerEnabled) {
-      setTimerKey(k => k + 1)
-      setTimerActive(true)
-    }
+    if (timerEnabled) restTimer.start(restSeconds, day.id)
   }
 
   const addSet = (exName) =>
@@ -785,6 +830,15 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
 
   const removeSet = (exName, idx) =>
     setSets(prev => ({ ...prev, [exName]: prev[exName].filter((_, i) => i !== idx) }))
+
+  // Check-mode toggle — flip `checked` and start the rest timer if enabled.
+  const toggleCheck = (exName, idx) => {
+    setSets(prev => ({
+      ...prev,
+      [exName]: prev[exName].map((s, i) => i === idx ? { ...s, checked: !s.checked } : s),
+    }))
+    if (timerEnabled) restTimer.start(restSeconds, day.id)
+  }
 
   const getLastSets = (exName) => {
     if (!lastSession) return []
@@ -874,7 +928,7 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
 
   // ── Completion ──────────────────────────────────────────
   const hasData =
-    Object.values(sets).some(s => s.some(r => r.weight !== '' || r.reps !== '')) ||
+    Object.values(sets).some(s => s.some(r => r.weight !== '' || r.reps !== '' || r.checked)) ||
     Object.values(activityLogs).some(l =>
       l.checked || l.duration_min || l.distance_display || l.intensity ||
       l.avg_hr || l.calories || l.rounds || l.elevation_display || l.notes
@@ -896,8 +950,15 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
             is_warmup: !!s.is_warmup,
             rir:       s.rir,
             rpe:       s.rpe,
+            checked:   !!s.checked,
           })),
         ])
+      )
+      // Track-mode lookup for completeWorkout to branch sets vs check rows.
+      const trackModeMap = Object.fromEntries(
+        exerciseList
+          .filter(e => e.item_type !== 'activity')
+          .map(e => [e.name, e.track_mode === 'check' ? 'check' : 'sets'])
       )
       // Canonicalize activity distances/elevations into km/m before saving.
       const activityLogsForSave = Object.fromEntries(
@@ -935,7 +996,7 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
         workoutIdRef.current = id
       }
       const workout = await completeWorkout(
-        id, dayLabel, setsForSave, activityLogsForSave, userId
+        id, dayLabel, setsForSave, activityLogsForSave, userId, trackModeMap
       )
       // The draft is now a finalized workout — drop the local cache.
       clearLsDraft(lsKey)
@@ -1006,7 +1067,7 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
             onClick={() => {
               const next = !timerEnabled
               setTimerEnabled(next)
-              if (!next) setTimerActive(false)
+              if (!next) restTimer.stop()
             }}
             title={timerEnabled ? 'Timer on — tap to disable' : 'Timer off — tap to enable'}
           >
@@ -1022,11 +1083,10 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
           </button>
         </header>
 
-        {timerActive && (
+        {restTimer.total > 0 && (
           <RestTimer
-            key={timerKey}
-            total={restSeconds}
-            onDismiss={() => setTimerActive(false)}
+            onDismiss={restTimer.stop}
+            onReset={restTimer.reset}
           />
         )}
       </div>
@@ -1052,19 +1112,36 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
         )}
 
         {/* Render items in their original order, mixing types */}
-        {exerciseList.map(item =>
-          item.item_type === 'activity' ? (
-            <ActivityCard
-              key={item.name}
-              item={item}
-              log={activityLogs[item.name] || makeEmptyActivity()}
-              unit={unit}
-              lastLog={getLastActivityLog(item.name)}
-              onToggle={() => toggleActivity(item.name)}
-              onUpdate={(field, val) => updateActivityField(item.name, field, val)}
-              onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
-            />
-          ) : (
+        {exerciseList.map(item => {
+          if (item.item_type === 'activity') {
+            return (
+              <ActivityCard
+                key={item.name}
+                item={item}
+                log={activityLogs[item.name] || makeEmptyActivity()}
+                unit={unit}
+                lastLog={getLastActivityLog(item.name)}
+                onToggle={() => toggleActivity(item.name)}
+                onUpdate={(field, val) => updateActivityField(item.name, field, val)}
+                onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
+              />
+            )
+          }
+          if (item.track_mode === 'check') {
+            const n = Math.max(1, item.set_count ?? 1)
+            const exSets = sets[item.name] || Array.from({ length: n }, () => makeEmptySet())
+            return (
+              <CheckCard
+                key={item.name}
+                exercise={item}
+                sets={exSets}
+                onToggleCheck={idx => toggleCheck(item.name, idx)}
+                onHistory={() => onHistory(item.name)}
+                onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
+              />
+            )
+          }
+          return (
             <ExerciseCard
               key={item.name}
               exercise={item}
@@ -1082,7 +1159,7 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
               onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
             />
           )
-        )}
+        })}
 
         <button className="add-exercise-btn" onClick={openAddPicker}>
           + Add exercise

@@ -131,6 +131,8 @@ export async function getProgram() {
         name:            e.name,
         target:          e.target || '',
         item_type:       e.item_type || 'exercise',
+        track_mode:      e.track_mode || 'sets',
+        set_count:       e.set_count ?? null,
         activity_fields: Array.isArray(e.activity_fields) ? e.activity_fields : null,
       })),
   }))
@@ -253,6 +255,8 @@ export async function saveProgram(days, uid) {
         name:            ex.name,
         target:          ex.target || '',
         item_type:       ex.item_type || 'exercise',
+        track_mode:      ex.item_type === 'exercise' ? (ex.track_mode || 'sets') : 'sets',
+        set_count:       ex.track_mode === 'check' ? (ex.set_count ?? 1) : null,
         sort_order:      j,
         activity_fields: ex.item_type === 'activity' && Array.isArray(ex.activity_fields)
           ? ex.activity_fields
@@ -450,15 +454,34 @@ export async function removeExerciseFromProgram(trainingDayId, exerciseName, uid
 // activityLogs:  { [name]: { checked, notes, duration_min, distance_km,
 //                            intensity, avg_hr, calories, rounds, elevation_m } }
 //   distance/elevation already canonicalized to km/m by caller.
-export async function completeWorkout(workoutId, dayLabel, exerciseSets, activityLogs, uid) {
+export async function completeWorkout(workoutId, dayLabel, exerciseSets, activityLogs, uid, trackModeMap = {}) {
   if (!uid) throw new Error('Not authenticated')
   if (!workoutId) throw new Error('No workout id')
 
   const rowsToInsert = []
 
-  // Exercise items — one row per set
+  // Exercise items — one row per set.
+  // Check-mode exercises store one row per ticked checkbox (weight=0, reps=0, checked=true).
   for (const [exerciseName, sets] of Object.entries(exerciseSets)) {
+    const isCheck = trackModeMap[exerciseName] === 'check'
     sets.forEach((set, idx) => {
+      if (isCheck) {
+        if (!set.checked) return
+        rowsToInsert.push({
+          user_id:       uid,
+          workout_id:    workoutId,
+          exercise_name: exerciseName,
+          set_number:    idx + 1,
+          weight_kg:     0,
+          reps:          0,
+          checked:       true,
+          notes:         '',
+          is_warmup:     false,
+          rir:           null,
+          rpe:           null,
+        })
+        return
+      }
       const w = typeof set.weight_kg === 'number' ? set.weight_kg : parseFloat(set.weight_kg)
       const r = parseInt(set.reps)
       if (!isNaN(w) || !isNaN(r)) {
@@ -608,7 +631,9 @@ export async function getWeeklyProgress(uid) {
 
   const [profileRes, weekWorkoutsRes] = await Promise.all([
     withTimeout(
-      supabase.from('profiles').select('weekly_target').eq('id', uid).single(),
+      // maybeSingle so a missing profile row doesn't crash — the ring is
+      // informational and should always render with a sensible default.
+      supabase.from('profiles').select('weekly_target').eq('id', uid).maybeSingle(),
       5000, 'Load weekly target'
     ),
     withTimeout(
@@ -620,7 +645,7 @@ export async function getWeeklyProgress(uid) {
     ),
   ])
 
-  if (profileRes.error)     throw new Error(`Load progress failed: ${profileRes.error.message}`)
+  if (profileRes.error)     console.warn('weekly target load:', profileRes.error.message)
   if (weekWorkoutsRes.error) throw new Error(`Load progress failed: ${weekWorkoutsRes.error.message}`)
 
   const target       = profileRes.data?.weekly_target ?? 4

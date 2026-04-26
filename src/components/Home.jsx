@@ -117,7 +117,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
       .catch(() => {})
     getWeeklyProgress(userId)
       .then(setWeeklyProgress)
-      .catch(() => {})
+      .catch(e => console.warn('weekly progress failed:', e.message))
     getInProgressDayIds(userId)
       .then(setDraftDayIds)
       .catch(() => {})

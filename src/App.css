@@ -815,7 +815,8 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   margin-bottom: 10px;
-  overflow: hidden;
+  /* overflow:visible so the autocomplete dropdown can escape the card. */
+  overflow: visible;
   transition: border-color 0.15s;
 }
 .day-edit-card--open { border-color: var(--surface3); }
@@ -950,6 +951,108 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   border-color: rgba(100,116,139,0.25);
 }
 .item-type-pill:active { opacity: 0.7; }
+
+/* ── Track / Check pill (exercise items only) ─────────── */
+.item-track-pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 3px 7px;
+  border-radius: 99px;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.item-track-pill--track {
+  background: rgba(0, 194, 168, 0.10);
+  color: #00C2A8;
+  border-color: rgba(0, 194, 168, 0.22);
+}
+.item-track-pill--check {
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.28);
+}
+.item-track-pill:active { opacity: 0.7; }
+
+/* Sets stepper for check-mode items */
+.set-count-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.set-count-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.set-count-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--surface3, #2a3340);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.set-count-btn:active { opacity: 0.75; }
+.set-count-value {
+  min-width: 24px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Check-mode workout card — checkbox per set */
+.check-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s, border-color 0.12s;
+}
+.check-row:active { transform: scale(0.99); }
+.check-row--done { border-color: var(--success, #22c55e); background: rgba(34, 197, 94, 0.06); }
+.check-num {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  width: 16px;
+  text-align: center;
+}
+.check-box {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.check-box--done { background: var(--success, #22c55e); border-color: var(--success, #22c55e); }
+.check-mark { color: white; font-size: 14px; line-height: 1; }
+.check-label {
+  flex: 1;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+.check-row--done .check-label { color: var(--text-muted); }
 
 /* ── Activity item card in WorkoutDay ────────────────── */
 .activity-item-card { padding-bottom: 4px; }
@@ -1544,6 +1647,31 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 .rest-timer-btn:hover { color: var(--text); }
 
+/* Floating rest-timer pill — shown across all screens while resting. */
+.floating-timer {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  background: var(--surface3, #1f2937);
+  color: var(--text, #fff);
+  border: 1px solid var(--border, #2c3340);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.floating-timer:active { transform: translateX(-50%) scale(0.97); }
+.floating-timer-label { font-variant-numeric: tabular-nums; }
+.floating-timer-arrow { opacity: 0.7; font-size: 16px; }
+
 /* Timer on/off toggle in workout header */
 .timer-toggle {
   background: none;
@@ -2002,6 +2130,186 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 .autocomplete-item:last-child { border-bottom: none; }
 .autocomplete-item:active { background: var(--surface2); color: var(--accent); }
+
+/* ── Browse / categorized picker (ProgramSetup) ───── */
+.ex-browse-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px 14px;
+  background: rgba(0, 194, 168, 0.10);
+  color: #00C2A8;
+  border: 1px dashed rgba(0, 194, 168, 0.35);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ex-browse-btn:active { opacity: 0.8; }
+
+.picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.picker-sheet {
+  width: 100%;
+  max-width: 480px;
+  max-height: 88vh;
+  background: var(--surface);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.5);
+  animation: picker-slide-up 0.22s ease-out;
+}
+@keyframes picker-slide-up {
+  from { transform: translateY(20px); opacity: 0.7; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.picker-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.picker-close {
+  background: none; border: none; color: var(--text-muted);
+  font-size: 24px; line-height: 1; padding: 4px 8px; cursor: pointer;
+}
+.picker-search {
+  margin: 12px 16px 0;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+}
+.picker-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px 0;
+}
+.picker-empty {
+  padding: 20px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.picker-group { margin-bottom: 6px; }
+.picker-group-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.picker-group-name { flex: 1; text-align: left; }
+.picker-group-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.picker-group-chev { font-size: 10px; color: var(--text-muted); }
+.picker-items { display: flex; flex-direction: column; padding: 6px 4px 8px; }
+.picker-item {
+  text-align: left;
+  padding: 11px 12px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.picker-item:last-child { border-bottom: none; }
+.picker-item:active { background: var(--surface2); color: var(--accent); }
+.picker-item--taken {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.picker-item-taken-tag {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.picker-create {
+  border-top: 1px solid var(--border);
+  padding: 12px 16px env(safe-area-inset-bottom, 12px);
+  background: var(--surface);
+}
+.picker-create-btn {
+  width: 100%;
+  padding: 12px;
+  background: var(--accent, #ff5500);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.picker-create-btn:active { opacity: 0.85; }
+.picker-create-row { display: flex; gap: 8px; align-items: center; }
+.picker-create-input {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--accent, #ff5500);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+}
+.picker-create-confirm {
+  padding: 10px 14px;
+  background: var(--accent, #ff5500);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.picker-create-cancel {
+  width: 36px;
+  height: 36px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 8px;
+  font-size: 18px;
+  cursor: pointer;
+}
+.picker-create-help {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
 
 /* ── Warmup row in history list ───────────────────── */
 .history-set-row--warmup {

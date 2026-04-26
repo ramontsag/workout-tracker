@@ -4,6 +4,8 @@ import { DEFAULT_DAYS, EMPTY_DAYS, OWNER_EMAIL } from '../data/defaultProgram'
 import {
   CURATED_ACTIVITIES, FIELD_CATALOG, defaultFieldsFor, DEFAULT_ACTIVITY_FIELDS,
 } from '../data/commonActivities'
+import { EXERCISE_CATALOG, CATALOG_NAMES } from '../data/exerciseCatalog'
+import ExercisePickerModal from './ExercisePickerModal'
 
 // ─────────────────────────────────────────────────────────────
 // Single day accordion card
@@ -12,6 +14,7 @@ function DayCard({
   day, isOpen, onToggle, onChange,
   newInput, onNewInputChange, onAddItem, onAddItemWithName,
   onRemoveItem, onMoveItem, onToggleItemType, onUpdateTarget, onToggleActivityField,
+  onToggleTrackMode, onUpdateSetCount, onOpenPicker,
   suggestions,
 }) {
   const [showSuggest, setShowSuggest] = useState(false)
@@ -85,6 +88,7 @@ function DayCard({
           <div className="ex-edit-list">
             {day.exercises.map((item, j) => {
               const isActivity = item.item_type === 'activity'
+              const isCheck    = !isActivity && item.track_mode === 'check'
               return (
                 <div key={j} className="ex-edit-item">
                   <div className="ex-edit-row">
@@ -103,18 +107,49 @@ function DayCard({
                       {isActivity ? 'Activity' : 'Exercise'}
                     </button>
 
+                    {/* Track / Check toggle — only for exercise items */}
+                    {!isActivity && (
+                      <button
+                        className={`item-track-pill ${isCheck ? 'item-track-pill--check' : 'item-track-pill--track'}`}
+                        onClick={() => onToggleTrackMode(j)}
+                        title={isCheck ? 'Switch to Track (sets · reps · weight)' : 'Switch to Check (just tick off)'}
+                      >
+                        {isCheck ? 'Check' : 'Track'}
+                      </button>
+                    )}
+
                     <span className="ex-edit-name">{item.name}</span>
                     <button className="ex-edit-remove" onClick={() => onRemoveItem(j)}>×</button>
                   </div>
 
-                  {/* Target — only for exercise items */}
-                  {!isActivity && (
+                  {/* Track-mode → free-form target text */}
+                  {!isActivity && !isCheck && (
                     <input
                       className="ex-target-input"
                       placeholder="Target (e.g. 3 sets of 8-10 reps)"
                       value={item.target || ''}
                       onChange={e => onUpdateTarget(j, e.target.value)}
                     />
+                  )}
+
+                  {/* Check-mode → numeric Sets stepper */}
+                  {!isActivity && isCheck && (
+                    <div className="set-count-row">
+                      <span className="set-count-label">Sets</span>
+                      <button
+                        type="button"
+                        className="set-count-btn"
+                        onClick={() => onUpdateSetCount(j, Math.max(1, (item.set_count ?? 1) - 1))}
+                        aria-label="Fewer sets"
+                      >−</button>
+                      <span className="set-count-value">{item.set_count ?? 1}</span>
+                      <button
+                        type="button"
+                        className="set-count-btn"
+                        onClick={() => onUpdateSetCount(j, Math.min(10, (item.set_count ?? 1) + 1))}
+                        aria-label="More sets"
+                      >+</button>
+                    </div>
                   )}
 
                   {/* Field picker — only for activity items */}
@@ -140,12 +175,21 @@ function DayCard({
             })}
           </div>
 
-          {/* Add item row — defaults to Exercise */}
+          {/* Add item — Browse opens the categorized picker; the input
+              still works for power users who type fast. */}
+          <button
+            type="button"
+            className="ex-browse-btn"
+            onClick={onOpenPicker}
+          >
+            + Browse exercises
+          </button>
+
           <div className="ex-add-wrap">
             <div className="ex-add-row">
               <input
                 className="field-input ex-add-input"
-                placeholder="Add item…"
+                placeholder="…or type a name"
                 value={newInput}
                 onChange={e => { onNewInputChange(e.target.value); setShowSuggest(true) }}
                 onFocus={() => setShowSuggest(true)}
@@ -199,16 +243,20 @@ export default function ProgramSetup({ userId, userEmail, initialDays, isEditing
   const [saving,  setSaving]  = useState(false)
   const [error,   setError]   = useState('')
   const [suggestions, setSuggestions] = useState([])
+  const [pickerForDay, setPickerForDay] = useState(null)  // dayIdx | null
+  const [knownNames, setKnownNames] = useState([])        // user's own names only
 
   useEffect(() => {
     if (!userId) return
     getAllKnownExerciseNames(userId)
       .then(names => {
-        // Union the curated activities list so common activity names
-        // (Running, BJJ, Yoga…) show up as suggestions even on a brand
-        // new account with no history. Dedupe case-insensitively.
+        setKnownNames(names || [])
+        // Merge the user's own program/history names with the curated
+        // catalog of common exercises and the curated activities list.
+        // Dedupe case-insensitively — user's own casing wins because it
+        // comes first in the array.
         const seen = new Map()
-        for (const n of [...names, ...CURATED_ACTIVITIES]) {
+        for (const n of [...names, ...CATALOG_NAMES, ...CURATED_ACTIVITIES]) {
           const k = n.toLowerCase()
           if (!seen.has(k)) seen.set(k, n)
         }
@@ -287,6 +335,32 @@ export default function ProgramSetup({ userId, userEmail, initialDays, isEditing
       }
     ))
 
+  const toggleTrackMode = (dayIdx, itemIdx) =>
+    setDays(prev => prev.map((d, i) =>
+      i !== dayIdx ? d : {
+        ...d,
+        exercises: d.exercises.map((item, j) => {
+          if (j !== itemIdx || item.item_type === 'activity') return item
+          const becomingCheck = item.track_mode !== 'check'
+          return {
+            ...item,
+            track_mode: becomingCheck ? 'check' : 'sets',
+            // When flipping to check-mode, default to 1 set if not already set.
+            // When flipping back to track-mode, drop set_count.
+            set_count:  becomingCheck ? (item.set_count ?? 1) : null,
+          }
+        }),
+      }
+    ))
+
+  const updateSetCount = (dayIdx, itemIdx, n) =>
+    setDays(prev => prev.map((d, i) =>
+      i !== dayIdx ? d : {
+        ...d,
+        exercises: d.exercises.map((item, j) => j === itemIdx ? { ...item, set_count: n } : item),
+      }
+    ))
+
   const toggleActivityField = (dayIdx, itemIdx, fieldKey) =>
     setDays(prev => prev.map((d, i) =>
       i !== dayIdx ? d : {
@@ -354,10 +428,23 @@ export default function ProgramSetup({ userId, userEmail, initialDays, isEditing
             onMoveItem={(itemIdx, dir) => moveItem(i, itemIdx, dir)}
             onToggleItemType={itemIdx => toggleItemType(i, itemIdx)}
             onUpdateTarget={(itemIdx, target) => updateTarget(i, itemIdx, target)}
+            onToggleTrackMode={itemIdx => toggleTrackMode(i, itemIdx)}
+            onUpdateSetCount={(itemIdx, n) => updateSetCount(i, itemIdx, n)}
             onToggleActivityField={(itemIdx, fieldKey) => toggleActivityField(i, itemIdx, fieldKey)}
+            onOpenPicker={() => setPickerForDay(i)}
             suggestions={suggestions}
           />
         ))}
+
+        <ExercisePickerModal
+          open={pickerForDay !== null}
+          onClose={() => setPickerForDay(null)}
+          onPick={(name) => {
+            if (pickerForDay !== null) addItemWithName(pickerForDay, name)
+          }}
+          userKnownNames={knownNames}
+          existingNames={pickerForDay !== null ? days[pickerForDay].exercises.map(e => e.name) : []}
+        />
 
         {error && <p className="err-msg">{error}</p>}
         <button className="complete-btn" style={{ marginTop: 8 }} onClick={handleSave} disabled={saving}>
