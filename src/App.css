@@ -2320,6 +2320,140 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   line-height: 1.4;
 }
 
+/* ── Edit Day modal ──────────────────────────────────── */
+.edit-day-sheet { max-height: 92vh; }
+.edit-day-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.field-label-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+.color-swatches { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.color-swatch--on { border-color: var(--text); }
+
+.rest-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+.rest-stepper-val {
+  min-width: 64px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+
+.edit-day-empty {
+  margin-top: 8px;
+  padding: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--surface2);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.edit-day-items { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.edit-day-add-row { display: flex; gap: 8px; margin-top: 14px; }
+.edit-day-add-row .ex-browse-btn { flex: 1; margin-top: 0; }
+.ex-browse-btn--alt {
+  background: rgba(99, 102, 241, 0.10);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.32);
+}
+
+/* Workout-screen controls row (rest stepper + timer flag) */
+.workout-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 16px 0;
+}
+.rest-stepper--inline { gap: 8px; }
+.rest-stepper--inline .rest-stepper-val { min-width: 80px; font-size: 13px; }
+.rest-timer-flag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--success, #22c55e);
+}
+.rest-timer-flag--off { color: var(--text-muted); }
+
+/* Workout-screen header gear button + dropdown menu */
+.workout-header-menu-wrap { position: relative; }
+.workout-gear-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.workout-gear-btn:hover { color: var(--text); }
+.workout-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: transparent;
+}
+.workout-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 70;
+  min-width: 180px;
+  background: var(--surface3, #1f2937);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+}
+.workout-menu-item {
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.workout-menu-item:hover { background: var(--surface2); }
+
+/* Mid-workout add row (Add exercise / Add activity) */
+.workout-add-row { display: flex; gap: 8px; margin-top: 12px; }
+.workout-add-row .ex-browse-btn { flex: 1; margin-top: 0; }
+.workout-add-save-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 0 4px;
+}
+
 /* ── Warmup row in history list ───────────────────── */
 .history-set-row--warmup {
   opacity: 0.55;
@@ -2595,6 +2729,24 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .resume-banner-discard:active { opacity: 0.7; }
 
 .day-card { position: relative; }
+.day-card__gear {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  z-index: 2;
+}
+.day-card__gear:hover { color: var(--text); }
+.day-card__gear:active { transform: scale(0.92); }
 .day-card__draft-dot {
   position: absolute;
   top: 10px;

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { supabase, getProgram, getStats, getProfile } from './supabase'
+import { supabase, getProgram, getStats, getProfile, seedProgramIfMissing } from './supabase'
 import AuthScreen      from './components/AuthScreen'
-import ProgramSetup    from './components/ProgramSetup'
 import Home            from './components/Home'
 import WorkoutDay      from './components/WorkoutDay'
 import ExerciseHistory from './components/ExerciseHistory'
@@ -11,9 +10,10 @@ import ArchivesScreen  from './components/ArchivesScreen'
 import SettingsScreen  from './components/SettingsScreen'
 import FloatingTimer   from './components/FloatingTimer'
 
-// Screens: loading → auth → setup → home
+// Screens: loading → auth → home
 //          home → workout → history → workout
-//          home → profile → setup (edit) | progress
+//          home → profile → progress | archives | settings
+// Brand-new accounts get 7 empty days auto-seeded so they always land on home.
 
 export default function App() {
   const [screen,          setScreen]         = useState('loading')
@@ -28,14 +28,19 @@ export default function App() {
   const screenRef = useRef('loading')
   const go = (s) => { screenRef.current = s; setScreen(s) }
 
-  const loadProgram = useCallback(async () => {
+  const loadProgram = useCallback(async (uid) => {
     try {
+      // Auto-seed 7 empty days for fresh accounts so they land on home
+      // with the same UI as everyone else (gear icon to edit each day).
+      if (uid) {
+        try { await seedProgramIfMissing(uid) } catch (e) { console.warn('[App] seed failed:', e.message) }
+      }
       const days = await getProgram()
       setProgram(days)
-      go(days.length > 0 ? 'home' : 'setup')
+      go('home')
     } catch (err) {
       console.error('[App] loadProgram failed:', err.message)
-      go('setup')
+      go('home')
     }
   }, []) // eslint-disable-line
 
@@ -60,7 +65,7 @@ export default function App() {
           clearTimeout(fallback)
           if (session?.user) {
             setUser(session.user)
-            await loadProgram()
+            await loadProgram(session.user.id)
             loadProfile()
             getStats().then(s => { setTotalWorkouts(s.totalWorkouts); setTotalActivities(s.totalActivities) }).catch(() => {})
           } else go('auth')
@@ -71,7 +76,7 @@ export default function App() {
             // Only navigate on a real sign-in; token refreshes also fire SIGNED_IN
             // but we must not disrupt an active screen (e.g. mid-workout logging)
             if (screenRef.current === 'auth') {
-              await loadProgram()
+              await loadProgram(session.user.id)
               loadProfile()
               getStats().then(s => { setTotalWorkouts(s.totalWorkouts); setTotalActivities(s.totalActivities) }).catch(() => {})
             }
@@ -109,19 +114,6 @@ export default function App() {
     }
     if (screen === 'auth') return <AuthScreen />
 
-    if (screen === 'setup') {
-      return (
-        <ProgramSetup
-          userId={user?.id}
-          userEmail={user?.email}
-          initialDays={program.length > 0 ? program : null}
-          isEditing={program.length > 0}
-          onComplete={loadProgram}
-          onBack={program.length > 0 ? () => go('home') : null}
-        />
-      )
-    }
-
     if (screen === 'history' && activeExercise) {
       return (
         <ExerciseHistory
@@ -133,13 +125,17 @@ export default function App() {
     }
 
     if (screen === 'workout' && activeDay) {
+      // Re-derive activeDay from program so EditDayModal saves see the latest items.
+      const liveDay = program.find(d => d.id === activeDay.id) || activeDay
       return (
         <WorkoutDay
-          day={activeDay}
+          day={liveDay}
+          program={program}
           userId={user?.id}
           profile={profile}
           onBack={() => { setActiveDay(null); go('home') }}
           onHistory={exercise => { setActiveExercise(exercise); go('history') }}
+          onProgramUpdated={() => loadProgram(user?.id)}
         />
       )
     }
@@ -151,7 +147,6 @@ export default function App() {
           totalWorkouts={totalWorkouts}
           totalActivities={totalActivities}
           onBack={() => go('home')}
-          onEditProgram={() => go('setup')}
           onProgress={() => go('progress')}
           onArchives={() => go('archives')}
           onSettings={() => go('settings')}
@@ -198,6 +193,7 @@ export default function App() {
         profile={profile}
         onSelectDay={day => { setActiveDay(day); go('workout') }}
         onProfile={() => go('profile')}
+        onProgramUpdated={() => loadProgram(user?.id)}
       />
     )
   }

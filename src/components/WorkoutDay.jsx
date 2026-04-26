@@ -3,6 +3,7 @@ import {
   getLastSession, completeWorkout, getPreviousSessionVolume, saveTemplate, getExerciseBests,
   getInProgressWorkout, upsertDraft, discardDraft,
   addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames,
+  updateDayMeta,
 } from '../supabase'
 import {
   displayWeight, parseInputWeight, unitLabel,
@@ -11,9 +12,22 @@ import {
 } from '../utils/units'
 import { DEFAULT_ACTIVITY_FIELDS } from '../data/commonActivities'
 import { useRestTimer } from '../useRestTimer'
+import CatalogPickerModal from './CatalogPickerModal'
+import EditDayModal from './EditDayModal'
+import { EXERCISE_CATALOG } from '../data/exerciseCatalog'
+import { ACTIVITY_CATALOG } from '../data/activityCatalog'
 
 function fmt(val) {
   return val === 0 || val === '0' ? '—' : val
+}
+
+function formatRestShort(s) {
+  if (s >= 60) {
+    const m = Math.floor(s / 60)
+    const r = s % 60
+    return r === 0 ? `${m}m` : `${m}:${String(r).padStart(2, '0')}`
+  }
+  return `${s}s`
 }
 
 // ── Local draft cache ─────────────────────────────────────────
@@ -494,7 +508,7 @@ function CheckCard({ exercise, sets, onToggleCheck, onHistory, onRemoveExercise 
 }
 
 // ── Main component ────────────────────────────────────────────
-export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) {
+export default function WorkoutDay({ day, program, userId, profile, onBack, onHistory, onProgramUpdated }) {
   const unit          = profile?.weight_unit    || 'kg'
   const intensityMode = profile?.intensity_mode || 'off'
 
@@ -568,13 +582,12 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
   const [resumePrompt, setResumePrompt] = useState(null)  // { draftId, draftState, startedAt } | null  (>12h)
 
   // Mid-workout add/remove UI state
-  const [pickerOpen,         setPickerOpen]         = useState(false)
-  const [pickerName,         setPickerName]         = useState('')
-  const [pickerType,         setPickerType]         = useState('exercise')
-  const [pickerAlsoProgram,  setPickerAlsoProgram]  = useState(false)
-  const [pickerErr,          setPickerErr]          = useState('')
-  const [knownNames,         setKnownNames]         = useState([])
-  const [removeTarget,       setRemoveTarget]       = useState(null)  // { name, alsoProgram }
+  const [pickerKind,    setPickerKind]    = useState(null)  // null | 'exercise' | 'activity'
+  const [pickerSaveToProgram, setPickerSaveToProgram] = useState(false)
+  const [knownNames,    setKnownNames]    = useState([])
+  const [removeTarget,  setRemoveTarget]  = useState(null)  // { name, alsoProgram }
+  const [editDayOpen,   setEditDayOpen]   = useState(false)
+  const [menuOpen,      setMenuOpen]      = useState(false)
 
   // PR tracking — exerciseBests: historical bests per exercise from DB
   //   { [name]: { bestE1RM, bestWeight, maxRepsAtWeight: {kg->reps} } }
@@ -860,12 +873,10 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
   }
 
   // ── Mid-workout add / remove exercise ────────────────────
-  const openAddPicker = async () => {
-    setPickerOpen(true)
-    setPickerName('')
-    setPickerErr('')
-    setPickerType('exercise')
-    setPickerAlsoProgram(false)
+  // Open the categorized picker for either exercise or activity. Pre-fetch
+  // the user's known names so the "Your X" group renders.
+  const openAddPicker = async (kind) => {
+    setPickerKind(kind)
     if (knownNames.length === 0 && userId) {
       try {
         const names = await getAllKnownExerciseNames(userId)
@@ -874,26 +885,25 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
     }
   }
 
-  const confirmAddPicker = async () => {
-    const name = pickerName.trim()
-    if (!name) { setPickerErr('Enter a name.'); return }
-    if (exerciseList.some(e => e.name.toLowerCase() === name.toLowerCase())) {
-      setPickerErr('Already in this workout.'); return
+  // Called when the user picks (or creates) an item in the catalog modal.
+  const handlePickItem = async (name) => {
+    const trimmed = (name || '').trim()
+    if (!trimmed) return
+    if (exerciseList.some(e => e.name.toLowerCase() === trimmed.toLowerCase())) {
+      setErrMsg(`"${trimmed}" is already in this workout.`)
+      return
     }
-    const picked = {
-      name,
-      target:    '',
-      item_type: pickerType,
-      activity_fields: pickerType === 'activity' ? null : undefined,
-    }
+    const isActivity = pickerKind === 'activity'
+    const picked = isActivity
+      ? { name: trimmed, target: '', item_type: 'activity', activity_fields: null }
+      : { name: trimmed, target: '', item_type: 'exercise', track_mode: 'sets', set_count: null }
     setExerciseList(prev => [...prev, picked])
-    if (pickerType === 'activity') {
-      setActivityLogs(prev => ({ ...prev, [name]: makeEmptyActivity() }))
+    if (isActivity) {
+      setActivityLogs(prev => ({ ...prev, [trimmed]: makeEmptyActivity() }))
     } else {
-      setSets(prev => ({ ...prev, [name]: [makeEmptySet(), makeEmptySet()] }))
+      setSets(prev => ({ ...prev, [trimmed]: [makeEmptySet(), makeEmptySet()] }))
     }
-    setPickerOpen(false)
-    if (pickerAlsoProgram) {
+    if (pickerSaveToProgram) {
       try {
         await addExerciseToProgram(day.id, picked, userId)
       } catch (e) {
@@ -1062,26 +1072,71 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
             </div>
           </div>
           {lastDate && <div className="workout-header__last">Last: {lastDate}</div>}
-          <button
-            className={`timer-toggle${timerEnabled ? ' timer-toggle--on' : ''}`}
-            onClick={() => {
-              const next = !timerEnabled
-              setTimerEnabled(next)
-              if (!next) restTimer.stop()
-            }}
-            title={timerEnabled ? 'Timer on — tap to disable' : 'Timer off — tap to enable'}
-          >
-            ⏱
-          </button>
-          <button
-            className="save-workout-btn"
-            onClick={handleArchiveTrigger}
-            title="Save workout as template"
-            aria-label="Save workout"
-          >
-            Save
-          </button>
+          <div className="workout-header-menu-wrap">
+            <button
+              className="workout-gear-btn"
+              onClick={() => setMenuOpen(o => !o)}
+              aria-label="Day options"
+              title="Options"
+            >⚙</button>
+            {menuOpen && (
+              <>
+                <div className="workout-menu-scrim" onClick={() => setMenuOpen(false)} />
+                <div className="workout-menu">
+                  <button className="workout-menu-item" onClick={() => { setMenuOpen(false); setEditDayOpen(true) }}>
+                    Edit day…
+                  </button>
+                  <button className="workout-menu-item" onClick={() => { setMenuOpen(false); handleArchiveTrigger() }}>
+                    Save as template…
+                  </button>
+                  <button
+                    className="workout-menu-item"
+                    onClick={() => {
+                      const next = !timerEnabled
+                      setTimerEnabled(next)
+                      if (!next) restTimer.stop()
+                      setMenuOpen(false)
+                    }}
+                  >
+                    {timerEnabled ? 'Disable rest timer' : 'Enable rest timer'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </header>
+
+        {/* Rest stepper — bumps day.rest_seconds by 15s and persists on change */}
+        <div className="workout-controls-row">
+          <div className="rest-stepper rest-stepper--inline">
+            <button
+              type="button"
+              className="set-count-btn"
+              onClick={() => {
+                const next = Math.max(30, restSeconds - 15)
+                onProgramUpdated && updateDayMeta(day.id, { rest_seconds: next }, userId)
+                  .then(onProgramUpdated)
+                  .catch(e => setErrMsg(e.message))
+              }}
+              aria-label="Less rest"
+            >−</button>
+            <span className="rest-stepper-val">{`Rest ${formatRestShort(restSeconds)}`}</span>
+            <button
+              type="button"
+              className="set-count-btn"
+              onClick={() => {
+                const next = Math.min(600, restSeconds + 15)
+                onProgramUpdated && updateDayMeta(day.id, { rest_seconds: next }, userId)
+                  .then(onProgramUpdated)
+                  .catch(e => setErrMsg(e.message))
+              }}
+              aria-label="More rest"
+            >+</button>
+          </div>
+          <span className={`rest-timer-flag${timerEnabled ? '' : ' rest-timer-flag--off'}`}>
+            {timerEnabled ? 'Timer on' : 'Timer off'}
+          </span>
+        </div>
 
         {restTimer.active && (
           <RestTimer
@@ -1161,9 +1216,18 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
           )
         })}
 
-        <button className="add-exercise-btn" onClick={openAddPicker}>
-          + Add exercise
-        </button>
+        <div className="workout-add-row">
+          <button className="ex-browse-btn" onClick={() => openAddPicker('exercise')}>+ Add exercise</button>
+          <button className="ex-browse-btn ex-browse-btn--alt" onClick={() => openAddPicker('activity')}>+ Add activity</button>
+        </div>
+        <label className="workout-add-save-row">
+          <input
+            type="checkbox"
+            checked={pickerSaveToProgram}
+            onChange={e => setPickerSaveToProgram(e.target.checked)}
+          />
+          <span>Also save to program</span>
+        </label>
 
         {errMsg && <p className="err-msg">{errMsg}</p>}
 
@@ -1250,48 +1314,32 @@ export default function WorkoutDay({ day, userId, profile, onBack, onHistory }) 
         </div>
       )}
 
-      {/* ── Add exercise picker ──────────────────────────── */}
-      {pickerOpen && (
-        <div className="modal-backdrop" onClick={() => setPickerOpen(false)}>
-          <div className="modal-card" onClick={e => e.stopPropagation()}>
-            <h3 className="modal-title">Add exercise to this workout</h3>
-            <div className="picker-type-row">
-              <button
-                className={`picker-type-chip${pickerType === 'exercise' ? ' picker-type-chip--on' : ''}`}
-                onClick={() => setPickerType('exercise')}
-              >Exercise</button>
-              <button
-                className={`picker-type-chip${pickerType === 'activity' ? ' picker-type-chip--on' : ''}`}
-                onClick={() => setPickerType('activity')}
-              >Activity</button>
-            </div>
-            <input
-              className="field-input"
-              list="picker-known-names"
-              placeholder="Exercise name…"
-              value={pickerName}
-              onChange={e => { setPickerName(e.target.value); setPickerErr('') }}
-              onKeyDown={e => e.key === 'Enter' && confirmAddPicker()}
-              autoFocus
-            />
-            <datalist id="picker-known-names">
-              {knownNames.map(n => <option key={n} value={n} />)}
-            </datalist>
-            <label className="modal-checkbox">
-              <input
-                type="checkbox"
-                checked={pickerAlsoProgram}
-                onChange={e => setPickerAlsoProgram(e.target.checked)}
-              />
-              Also add to {day.name} program
-            </label>
-            {pickerErr && <div className="err-msg" style={{ marginTop: 4 }}>{pickerErr}</div>}
-            <div className="modal-actions">
-              <button className="modal-btn-primary" onClick={confirmAddPicker}>Add</button>
-              <button className="modal-btn-cancel" onClick={() => setPickerOpen(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
+      {/* Categorized picker — same modal pattern as Edit Day */}
+      {pickerKind && (
+        <CatalogPickerModal
+          open
+          onClose={() => setPickerKind(null)}
+          onPick={handlePickItem}
+          catalog={pickerKind === 'activity' ? ACTIVITY_CATALOG : EXERCISE_CATALOG}
+          userKnownNames={knownNames}
+          existingNames={exerciseList.map(e => e.name)}
+          title={pickerKind === 'activity' ? 'Add activity' : 'Add exercise'}
+          createLabel={pickerKind === 'activity' ? '+ Create your own activity' : '+ Create your own exercise'}
+          createPlaceholder={pickerKind === 'activity' ? 'Activity name' : 'Exercise name'}
+          yourGroupLabel={pickerKind === 'activity' ? 'Your activities' : 'Your exercises'}
+        />
+      )}
+
+      {/* Per-day editor for the active workout */}
+      {editDayOpen && (
+        <EditDayModal
+          open
+          day={day}
+          program={program || [day]}
+          userId={userId}
+          onClose={() => setEditDayOpen(false)}
+          onSaved={onProgramUpdated}
+        />
       )}
 
       {/* ── Remove exercise confirm ──────────────────────── */}

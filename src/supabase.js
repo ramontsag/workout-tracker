@@ -102,6 +102,41 @@ export async function getProfile() {
 
 // ── Program ───────────────────────────────────────────────────
 
+// Auto-creates 7 empty training_days rows (Monday → Sunday) on first sign-in
+// for an account that has none. Idempotent — calling it on an existing
+// account is a no-op.
+export async function seedProgramIfMissing(uid) {
+  if (!uid) return
+  const { count, error: countErr } = await withTimeout(
+    supabase.from('training_days').select('id', { count: 'exact', head: true }).eq('user_id', uid),
+    5000, 'Check program'
+  )
+  if (countErr) throw new Error(`Check program failed: ${countErr.message}`)
+  if (count && count > 0) return
+  const WEEK = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+  const rows = WEEK.map((name, i) => ({
+    user_id: uid, name, focus: '', color: '#64748b',
+    sort_order: i, rest_seconds: 90,
+  }))
+  const { error: insErr } = await withTimeout(
+    supabase.from('training_days').insert(rows),
+    5000, 'Seed program'
+  )
+  if (insErr) throw new Error(`Seed program failed: ${insErr.message}`)
+}
+
+// Partial UPDATE on a single training_day row. Used by EditDayModal and the
+// mid-workout rest stepper. Cheaper than calling saveProgram for tiny edits.
+export async function updateDayMeta(dayId, fields, uid) {
+  if (!uid)   throw new Error('Not authenticated')
+  if (!dayId) throw new Error('No day id')
+  const { error } = await withTimeout(
+    supabase.from('training_days').update(fields).eq('id', dayId).eq('user_id', uid),
+    5000, 'Update day'
+  )
+  if (error) throw new Error(`Update day failed: ${error.message}`)
+}
+
 export async function getProgram() {
   // Query both tables in parallel.
   // activity_days may or may not still exist (depends on whether

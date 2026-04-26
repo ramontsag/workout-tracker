@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { getExerciseHistory } from '../supabase'
 import { displayWeight, unitLabel, kgToLbs } from '../utils/units'
+import { formatActivityLine, isActivityRow } from '../utils/sessionFormat'
 
 function fmt(val) { return val === 0 ? '—' : val }
 
@@ -51,7 +52,12 @@ export default function ExerciseHistory({ exercise, profile, onBack }) {
                 weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
               })
             : 'Unknown date'
-          const volKg = volumeKg(session.sets)
+
+          // If every row in this session is an activity row, render the session
+          // as an activity log (one line per session) and skip the volume + set-row
+          // rendering that only makes sense for weighted sets.
+          const allActivity = session.sets.length > 0 && session.sets.every(isActivityRow)
+          const volKg = allActivity ? 0 : volumeKg(session.sets)
           const volDisplay = unit === 'lbs' ? kgToLbs(volKg) : volKg
 
           return (
@@ -66,16 +72,29 @@ export default function ExerciseHistory({ exercise, profile, onBack }) {
                 </div>
               )}
               <div className="history-sets">
-                {session.sets.map((s, idx) => (
-                  <div key={idx} className={`history-set-row ${s.is_warmup ? 'history-set-row--warmup' : ''}`}>
-                    <span className="history-set-num">
-                      {s.is_warmup ? 'Warmup' : `Set ${s.set_number}`}
-                    </span>
-                    <span className="history-set-vals">
-                      {s.weight_kg ? `${displayWeight(s.weight_kg, unit)} ${label}` : '—'} × {fmt(s.reps)} reps
-                    </span>
-                  </div>
-                ))}
+                {session.sets.map((s, idx) => {
+                  if (isActivityRow(s)) {
+                    const line = formatActivityLine(s, unit)
+                    return (
+                      <div key={idx} className="history-set-row">
+                        <span className="history-set-vals">
+                          {line || (s.checked ? 'Completed' : '—')}
+                          {s.notes && <span className="history-set-notes"> · {s.notes}</span>}
+                        </span>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div key={idx} className={`history-set-row ${s.is_warmup ? 'history-set-row--warmup' : ''}`}>
+                      <span className="history-set-num">
+                        {s.is_warmup ? 'Warmup' : `Set ${s.set_number}`}
+                      </span>
+                      <span className="history-set-vals">
+                        {s.weight_kg ? `${displayWeight(s.weight_kg, unit)} ${label}` : '—'} × {fmt(s.reps)} reps
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )

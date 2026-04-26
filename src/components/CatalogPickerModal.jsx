@@ -1,20 +1,35 @@
 import React, { useState, useMemo } from 'react'
-import { EXERCISE_CATALOG } from '../data/exerciseCatalog'
 
-// Categorized exercise picker — bottom sheet shown when adding to a day.
-// Search filters across all groups. "Your exercises" surfaces names from
-// the user's program/history that aren't in the curated catalog.
-// "Create your own exercise" is the explicit path for new names.
+// Generic categorized picker — bottom-sheet modal used for both exercises and
+// activities. Accepts any catalog shaped as either:
+//   [{ group, items: string[] }]                              (flat groups)
+//   [{ group, subgroups: [{ name, items: string[] }] }]       (nested)
+// The component normalizes flat groups into a single nameless subgroup so the
+// render path is uniform.
 //
 // Props:
 //   - open: boolean
 //   - onClose: () => void
 //   - onPick: (name: string) => void
-//   - userKnownNames: string[]  (program + history names)
-//   - existingNames: string[]   (already on this day; greyed out)
-export default function ExercisePickerModal({ open, onClose, onPick, userKnownNames = [], existingNames = [] }) {
+//   - catalog: [{ group, items? | subgroups? }]
+//   - userKnownNames?: string[]   names from the user's program/history
+//   - existingNames?:  string[]   names already on this day; greyed out
+//   - title?: string                          default "Add item"
+//   - createLabel?: string                    default "+ Create your own"
+//   - createPlaceholder?: string              default "Name"
+//   - yourGroupLabel?: string                 default "Your items"
+export default function CatalogPickerModal({
+  open, onClose, onPick,
+  catalog,
+  userKnownNames = [],
+  existingNames  = [],
+  title             = 'Add item',
+  createLabel       = '+ Create your own',
+  createPlaceholder = 'Name',
+  yourGroupLabel    = 'Your items',
+}) {
   const [query, setQuery] = useState('')
-  const [openGroup, setOpenGroup] = useState('Chest')
+  const [openGroup, setOpenGroup] = useState(null)
   const [creatingName, setCreatingName] = useState(null)  // null | string
 
   const existingLower = useMemo(
@@ -22,11 +37,20 @@ export default function ExercisePickerModal({ open, onClose, onPick, userKnownNa
     [existingNames]
   )
 
-  // Names from the user's program/history that aren't in the curated catalog
-  // — surfaced as a "Your exercises" group at the top.
-  const yourExercises = useMemo(() => {
+  // Normalize catalog entries — flat groups get a single nameless subgroup.
+  const normalizedCatalog = useMemo(
+    () => catalog.map(g =>
+      g.subgroups
+        ? g
+        : { group: g.group, subgroups: [{ name: '', items: g.items || [] }] }
+    ),
+    [catalog]
+  )
+
+  // User names not already in the catalog become a "Your X" group at the top.
+  const yourItems = useMemo(() => {
     const catalogLower = new Set(
-      EXERCISE_CATALOG.flatMap(g => g.subgroups.flatMap(sg => sg.items)).map(n => n.toLowerCase())
+      normalizedCatalog.flatMap(g => g.subgroups.flatMap(sg => sg.items)).map(n => n.toLowerCase())
     )
     const seen = new Set()
     const out = []
@@ -37,17 +61,15 @@ export default function ExercisePickerModal({ open, onClose, onPick, userKnownNa
       out.push(n)
     }
     return out.sort((a, b) => a.localeCompare(b))
-  }, [userKnownNames])
+  }, [userKnownNames, normalizedCatalog])
 
-  // Normalize all groups to the same { group, subgroups: [{name, items}] } shape.
-  // "Your exercises" gets a single nameless subgroup so it renders flat.
   const groups = useMemo(() => {
     const all = []
-    if (yourExercises.length) {
-      all.push({ group: 'Your exercises', subgroups: [{ name: '', items: yourExercises }] })
+    if (yourItems.length) {
+      all.push({ group: yourGroupLabel, subgroups: [{ name: '', items: yourItems }] })
     }
-    return [...all, ...EXERCISE_CATALOG]
-  }, [yourExercises])
+    return [...all, ...normalizedCatalog]
+  }, [yourItems, normalizedCatalog, yourGroupLabel])
 
   const q = query.trim().toLowerCase()
   const filtered = useMemo(() => {
@@ -86,7 +108,7 @@ export default function ExercisePickerModal({ open, onClose, onPick, userKnownNa
     <div className="picker-overlay" onClick={onClose}>
       <div className="picker-sheet" onClick={e => e.stopPropagation()}>
         <div className="picker-header">
-          <span className="picker-title">Add exercise</span>
+          <span className="picker-title">{title}</span>
           <button className="picker-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
@@ -148,17 +170,14 @@ export default function ExercisePickerModal({ open, onClose, onPick, userKnownNa
 
         <div className="picker-create">
           {creatingName === null ? (
-            <button
-              className="picker-create-btn"
-              onClick={() => setCreatingName(query)}
-            >
-              + Create your own exercise
+            <button className="picker-create-btn" onClick={() => setCreatingName(query)}>
+              {createLabel}
             </button>
           ) : (
             <div className="picker-create-row">
               <input
                 className="picker-create-input"
-                placeholder="Exercise name"
+                placeholder={createPlaceholder}
                 value={creatingName}
                 onChange={e => setCreatingName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreate() } }}

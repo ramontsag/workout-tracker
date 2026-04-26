@@ -9,6 +9,7 @@ import {
   displayDistance, distanceUnitLabel,
   displayElevation, elevationUnitLabel,
 } from '../utils/units'
+import { formatActivityLine } from '../utils/sessionFormat'
 
 function getToday() {
   const d = new Date()
@@ -235,17 +236,7 @@ export default function ProgressScreen({ user, profile, onBack }) {
     return { label: 'Sessions', value: String(activityHistory.length) }
   })()
 
-  const formatSessionLine = (s) => {
-    const parts = []
-    if (s.distance_km != null && s.distance_km > 0) parts.push(`${displayDistance(s.distance_km, unit)} ${distanceUnitLabel(unit)}`)
-    if (s.duration_min != null && s.duration_min > 0) parts.push(`${Math.round(s.duration_min)} min`)
-    if (s.intensity != null) parts.push(`${s.intensity}/5`)
-    if (s.avg_hr != null && s.avg_hr > 0) parts.push(`${s.avg_hr} bpm`)
-    if (s.calories != null && s.calories > 0) parts.push(`${s.calories} kcal`)
-    if (s.rounds != null && s.rounds > 0) parts.push(`${s.rounds} rds`)
-    if (s.elevation_m != null && s.elevation_m > 0) parts.push(`${displayElevation(s.elevation_m, unit)} ${elevationUnitLabel(unit)}`)
-    return parts.join(' · ')
-  }
+  const formatSessionLine = (s) => formatActivityLine(s, unit)
 
   return (
     <div className="screen">

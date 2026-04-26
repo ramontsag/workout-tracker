@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { getProfile, signOut, saveWeeklyTarget, submitFeedback } from '../supabase'
 
-export default function ProfileScreen({ user, totalWorkouts, totalActivities, onBack, onEditProgram, onProgress, onArchives, onSettings }) {
+export default function ProfileScreen({ user, totalWorkouts, totalActivities, onBack, onProgress, onArchives, onSettings }) {
   const [profile,        setProfile]       = useState(null)
   const [signingOut,     setSigningOut]    = useState(false)
   const [weeklyTarget,   setWeeklyTarget]  = useState(4)
@@ -97,15 +97,6 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
             <span className="profile-action-text">
               <span className="profile-action-title">Progress</span>
               <span className="profile-action-sub">Weight trend & workout volume</span>
-            </span>
-            <span className="profile-action-chevron">›</span>
-          </button>
-
-          <button className="profile-action-btn" style={{ marginTop: 8 }} onClick={onEditProgram}>
-            <span className="profile-action-icon">📋</span>
-            <span className="profile-action-text">
-              <span className="profile-action-title">Edit Program</span>
-              <span className="profile-action-sub">Manage your training days & exercises</span>
             </span>
             <span className="profile-action-chevron">›</span>
           </button>

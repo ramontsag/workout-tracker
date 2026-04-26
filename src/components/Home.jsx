@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { getBodyWeightLogs, logBodyWeight, getWeeklyProgress, getInProgressDayIds, discardDraft, getInProgressWorkout } from '../supabase'
 import { displayWeight, parseInputWeight, unitLabel } from '../utils/units'
+import EditDayModal from './EditDayModal'
 
 const DAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
 const DAY_ABBREV = {
@@ -96,7 +97,7 @@ function weeklyMessage(completed, target, workouts, activities) {
 }
 
 // ── Main component ────────────────────────────────────────────
-export default function Home({ program, userId, profile, onSelectDay, onProfile }) {
+export default function Home({ program, userId, profile, onSelectDay, onProfile, onProgramUpdated }) {
   const unit = profile?.weight_unit || 'kg'
   const label = unitLabel(unit)
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' })
@@ -162,6 +163,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
   }
 
   const [pendingDay, setPendingDay] = useState(null)
+  const [editDay,    setEditDay]    = useState(null)
 
   const sorted = program.filter(d => DAY_ORDER.includes(d.name)).sort((a, b) => {
     const ai = DAY_ORDER.indexOf(a.name)
@@ -295,11 +297,14 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
             const hasDraft      = draftDayIds.has(day.id)
 
             return (
-              <button
+              <div
                 key={day.id}
                 className={`day-card ${typeClass}${isToday ? ' day-card--today' : ''}`}
                 style={{ animationDelay: `${i * 50}ms` }}
+                role="button"
+                tabIndex={0}
                 onClick={() => isToday ? onSelectDay(day) : setPendingDay(day)}
+                onKeyDown={(e) => { if (e.key === 'Enter') (isToday ? onSelectDay(day) : setPendingDay(day)) }}
               >
                 {hasDraft && (
                   <span className="day-card__draft-dot" title="Unfinished workout" aria-label="In progress" />
@@ -323,13 +328,30 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile 
                     <div className="day-card__indicator-dash" />
                   </div>
                 </div>
-              </button>
+                <button
+                  className="day-card__gear"
+                  onClick={(e) => { e.stopPropagation(); setEditDay(day) }}
+                  aria-label={`Edit ${day.name}`}
+                  title="Edit day"
+                >⚙</button>
+              </div>
             )
           })}
         </div>
       )}
 
       <div style={{ height: 40 }} />
+
+      {editDay && (
+        <EditDayModal
+          open
+          day={editDay}
+          program={program}
+          userId={userId}
+          onClose={() => setEditDay(null)}
+          onSaved={onProgramUpdated}
+        />
+      )}
 
       {pendingDay && (
         <div className="makeup-overlay" onClick={() => setPendingDay(null)}>
