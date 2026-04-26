@@ -311,7 +311,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                   <span className="day-card__draft-dot" title="Unfinished workout" aria-label="In progress" />
                 )}
                 {isDone && (
-                  <span className="day-card__done-mark" title="Completed this week" aria-label="Completed">✓</span>
+                  <span className={`day-card__done-mark day-card__done-mark--${indicatorType}`} title="Completed this week" aria-label="Completed">✓</span>
                 )}
                 {isToday && (
                   <div className={`day-card__stripe day-card__stripe--${indicatorType}`}>
