@@ -2230,6 +2230,15 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 .picker-group-chev { font-size: 10px; color: var(--text-muted); }
 .picker-items { display: flex; flex-direction: column; padding: 6px 4px 8px; }
+.picker-subgroup { display: flex; flex-direction: column; }
+.picker-subgroup-name {
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
 .picker-item {
   text-align: left;
   padding: 11px 12px;

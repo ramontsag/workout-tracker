@@ -1,110 +1,251 @@
-// Curated catalog of standard gym exercises, grouped by primary muscle.
-// Used by ProgramSetup's exercise picker. Custom exercises live alongside
+// Curated catalog of standard gym exercises, grouped by muscle and
+// then by sub-group (e.g. Chest → Upper / Mid / Lower). Used by
+// ProgramSetup's exercise picker. Custom exercises live alongside
 // these via the user's program/history (see getAllKnownExerciseNames).
 
 export const EXERCISE_CATALOG = [
-  { group: 'Chest', items: [
-    'Barbell bench press', 'Dumbbell bench press',
-    'Incline barbell press', 'Incline dumbbell press',
-    'Decline barbell press', 'Decline dumbbell press',
-    'Smith machine bench press', 'Smith machine incline press',
-    'Chest press machine', 'Incline chest press machine',
-    'Push-up', 'Incline push-up', 'Decline push-up',
-    'Dips (chest)', 'Weighted dips (chest)',
-    'Cable fly (high to low)', 'Cable fly (low to high)', 'Cable fly (mid)',
-    'Pec deck', 'Dumbbell fly (flat)', 'Dumbbell fly (incline)',
-    'Dumbbell pullover',
-  ] },
-  { group: 'Back', items: [
-    'Pull-up', 'Chin-up', 'Weighted pull-up',
-    'Lat pulldown (wide)', 'Lat pulldown (close)', 'Lat pulldown (neutral)',
-    'Single-arm lat pulldown',
-    'Barbell row (bent over)', 'Pendlay row', 'T-bar row',
-    'Single-arm dumbbell row',
-    'Chest-supported row (machine)', 'Chest-supported row (dumbbell)',
-    'Seated cable row (wide)', 'Seated cable row (close)', 'Seated cable row (neutral)',
-    'Single-arm cable row',
-    'Machine row (low)', 'Machine row (high)',
-    'Straight-arm cable pulldown',
-    'Shrug (barbell)', 'Shrug (dumbbell)', 'Shrug (cable)', 'Shrug (machine)',
-    'Hyperextension', 'Reverse hyperextension',
-  ] },
-  { group: 'Shoulders', items: [
-    'Overhead press (barbell)', 'Overhead press (dumbbell)',
-    'Seated overhead press (barbell)', 'Seated overhead press (dumbbell)',
-    'Shoulder press machine', 'Smith machine overhead press',
-    'Arnold press',
-    'Lateral raise (dumbbell)', 'Lateral raise (cable)', 'Lateral raise (machine)',
-    'Single-arm lateral raise (cable)',
-    'Front raise (dumbbell)', 'Front raise (cable)', 'Front raise (plate)',
-    'Rear delt fly (dumbbell)', 'Rear delt fly (cable)', 'Reverse pec deck',
-    'Face pull',
-    'Upright row (barbell)', 'Upright row (cable)',
-    'Landmine press',
-  ] },
-  { group: 'Biceps', items: [
-    'Barbell curl', 'EZ-bar curl',
-    'Dumbbell curl (standing)', 'Dumbbell curl (seated)',
-    'Hammer curl (dumbbell)', 'Hammer curl (rope)',
-    'Preacher curl (barbell)', 'Preacher curl (EZ-bar)',
-    'Preacher curl (dumbbell)', 'Preacher curl (machine)',
-    'Incline dumbbell curl', 'Concentration curl',
-    'Cable curl (straight bar)', 'Cable curl (rope)', 'Single-arm cable curl',
-    'Spider curl', 'Bayesian curl',
-    'Reverse curl (barbell)', 'Reverse curl (cable)',
-    'Drag curl', 'Zottman curl',
-  ] },
-  { group: 'Triceps', items: [
-    'Tricep pushdown (rope)', 'Tricep pushdown (straight bar)', 'Tricep pushdown (V-bar)',
-    'Single-arm tricep pushdown',
-    'Overhead tricep extension (rope)', 'Overhead tricep extension (dumbbell)',
-    'Overhead tricep extension (cable)',
-    'Skull crusher (barbell)', 'Skull crusher (EZ-bar)', 'Skull crusher (dumbbell)',
-    'Close-grip bench press',
-    'Tricep dips', 'Bench dips',
-    'Tricep kickback (dumbbell)', 'Tricep kickback (cable)',
-    'Tricep extension machine', 'JM press',
-  ] },
-  { group: 'Quads', items: [
-    'Back squat (barbell)', 'Front squat', 'Goblet squat',
-    'Smith machine squat', 'Hack squat (machine)',
-    'Bulgarian split squat', 'Walking lunge', 'Reverse lunge',
-    'Leg press', 'Single-leg press',
-    'Leg extension', 'Single-leg extension',
-    'Sissy squat', 'Step-up', 'Pistol squat',
-  ] },
-  { group: 'Hamstrings', items: [
-    'Romanian deadlift (barbell)', 'Romanian deadlift (dumbbell)',
-    'Stiff-leg deadlift', 'Conventional deadlift', 'Sumo deadlift', 'Trap bar deadlift',
-    'Lying leg curl', 'Seated leg curl', 'Standing leg curl', 'Single-leg curl',
-    'Nordic curl', 'Glute-ham raise',
-  ] },
-  { group: 'Glutes', items: [
-    'Hip thrust (barbell)', 'Hip thrust (machine)', 'Single-leg hip thrust',
-    'Glute bridge',
-    'Cable kickback', 'Cable abduction',
-    'Hip abduction (machine)',
-    'Sumo squat', 'Cossack squat',
-  ] },
-  { group: 'Calves', items: [
-    'Standing calf raise (machine)', 'Seated calf raise (machine)',
-    'Standing calf raise (smith)', 'Calf raise (leg press)',
-    'Single-leg calf raise (dumbbell)', 'Donkey calf raise',
-  ] },
-  { group: 'Core', items: [
-    'Hanging leg raise', 'Hanging knee raise', "Captain's chair leg raise",
-    'Cable crunch', 'Decline sit-up', 'Sit-up', 'Crunch',
-    'Plank', 'Side plank',
-    'Russian twist', 'Ab wheel rollout',
-    'Dead bug', 'Bird dog',
-    'Pallof press', 'Cable woodchopper',
-    'Toes to bar', 'L-sit hold', 'Hollow body hold',
-  ] },
-  { group: 'Forearms', items: [
-    'Wrist curl (barbell)', 'Wrist curl (dumbbell)', 'Reverse wrist curl',
-    "Farmer's walk", 'Dead hang',
-  ] },
+  {
+    group: 'Chest',
+    subgroups: [
+      { name: 'Upper (incline)', items: [
+        'Incline barbell press', 'Incline dumbbell press',
+        'Smith machine incline press', 'Incline chest press machine',
+        'Incline dumbbell fly', 'Cable fly (low to high)',
+        'Reverse-grip bench press', 'Incline push-up', 'Landmine press',
+      ] },
+      { name: 'Mid (flat)', items: [
+        'Barbell bench press', 'Dumbbell bench press',
+        'Smith machine bench press', 'Chest press machine',
+        'Dumbbell fly (flat)', 'Cable fly (mid)', 'Pec deck',
+        'Push-up', 'Svend press',
+      ] },
+      { name: 'Lower (decline)', items: [
+        'Decline barbell press', 'Decline dumbbell press', 'Decline push-up',
+        'Cable fly (high to low)',
+        'Dips (chest)', 'Weighted dips (chest)',
+        'Dumbbell pullover',
+      ] },
+    ],
+  },
+  {
+    group: 'Back',
+    subgroups: [
+      { name: 'Lats (vertical pull)', items: [
+        'Pull-up', 'Chin-up', 'Weighted pull-up',
+        'Lat pulldown (wide)', 'Lat pulldown (close)', 'Lat pulldown (neutral)',
+        'Single-arm lat pulldown', 'Straight-arm cable pulldown', 'Cable lat pullover',
+      ] },
+      { name: 'Mid back (horizontal pull)', items: [
+        'Barbell row (bent over)', 'Pendlay row', 'T-bar row',
+        'Single-arm dumbbell row',
+        'Chest-supported row (machine)', 'Chest-supported row (dumbbell)',
+        'Seated cable row (wide)', 'Seated cable row (close)', 'Seated cable row (neutral)',
+        'Single-arm cable row',
+        'Machine row (low)', 'Machine row (high)',
+        'Inverted row', 'Meadows row', 'Seal row',
+      ] },
+      { name: 'Lower back / erectors', items: [
+        'Hyperextension', 'Reverse hyperextension',
+        'Good morning', 'Back extension (machine)',
+      ] },
+      { name: 'Traps', items: [
+        'Shrug (barbell)', 'Shrug (dumbbell)', 'Shrug (cable)', 'Shrug (machine)',
+        'Rack pull', 'Snatch-grip high pull',
+      ] },
+    ],
+  },
+  {
+    group: 'Shoulders',
+    subgroups: [
+      { name: 'Front delts', items: [
+        'Military press', 'Overhead press (dumbbell)',
+        'Seated overhead press (barbell)', 'Seated overhead press (dumbbell)',
+        'Shoulder press machine', 'Smith machine overhead press',
+        'Arnold press', 'Push press', 'Z-press',
+        'Front raise (dumbbell)', 'Front raise (cable)', 'Front raise (plate)',
+        'Landmine press',
+      ] },
+      { name: 'Side delts', items: [
+        'Lateral raise (dumbbell, standing)', 'Lateral raise (dumbbell, seated)',
+        'Lateral raise (cable)', 'Lateral raise (machine)',
+        'Single-arm lateral raise (cable)',
+        'Leaning lateral raise', 'Lying side raise', 'Cable Y-raise',
+        'Upright row (barbell)', 'Upright row (cable)',
+      ] },
+      { name: 'Rear delts', items: [
+        'Rear delt fly (dumbbell)', 'Rear delt fly (cable)', 'Reverse pec deck',
+        'Bent-over rear delt raise', 'Face pull', 'Prone Y-raise',
+      ] },
+    ],
+  },
+  {
+    group: 'Biceps',
+    subgroups: [
+      { name: 'Long head (overhead / stretched)', items: [
+        'Incline dumbbell curl', 'Bayesian curl', 'Drag curl',
+        'Behind-the-body cable curl',
+      ] },
+      { name: 'Short head (peak / contracted)', items: [
+        'Preacher curl (barbell)', 'Preacher curl (EZ-bar)',
+        'Preacher curl (dumbbell)', 'Preacher curl (machine)',
+        'Spider curl', 'Concentration curl',
+      ] },
+      { name: 'Both heads (general)', items: [
+        'Barbell curl', 'EZ-bar curl',
+        'Dumbbell curl (standing)', 'Dumbbell curl (seated)',
+        'Cable curl (straight bar)', 'Cable curl (rope)', 'Single-arm cable curl',
+      ] },
+      { name: 'Brachialis / brachioradialis', items: [
+        'Hammer curl (dumbbell)', 'Hammer curl (rope)', 'Cross-body hammer curl',
+        'Reverse curl (barbell)', 'Reverse curl (cable)', 'Zottman curl',
+      ] },
+    ],
+  },
+  {
+    group: 'Triceps',
+    subgroups: [
+      { name: 'Long head (overhead)', items: [
+        'Overhead tricep extension (rope)', 'Overhead tricep extension (dumbbell)',
+        'Overhead tricep extension (cable)',
+        'Skull crusher (barbell)', 'Skull crusher (EZ-bar)', 'Skull crusher (dumbbell)',
+      ] },
+      { name: 'Lateral head (pushdown)', items: [
+        'Tricep pushdown (rope)', 'Tricep pushdown (straight bar)', 'Tricep pushdown (V-bar)',
+        'Single-arm tricep pushdown',
+        'Tricep kickback (dumbbell)', 'Tricep kickback (cable)',
+      ] },
+      { name: 'Compound (all heads)', items: [
+        'Close-grip bench press', 'JM press', 'Tricep dips', 'Bench dips',
+        'Tricep extension machine',
+      ] },
+    ],
+  },
+  {
+    group: 'Quads',
+    subgroups: [
+      { name: 'Compound (bilateral)', items: [
+        'Back squat (barbell)', 'Front squat', 'Goblet squat',
+        'Smith machine squat', 'Hack squat (machine)', 'Leg press',
+        'Box squat', 'Pause squat', 'Belt squat',
+      ] },
+      { name: 'Isolation', items: [
+        'Leg extension', 'Single-leg extension', 'Sissy squat',
+      ] },
+      { name: 'Unilateral', items: [
+        'Bulgarian split squat', 'Walking lunge', 'Reverse lunge',
+        'Step-up', 'Pistol squat', 'Single-leg press',
+      ] },
+    ],
+  },
+  {
+    group: 'Hamstrings',
+    subgroups: [
+      { name: 'Hip-hinge (upper hams + glutes)', items: [
+        'Romanian deadlift (barbell)', 'Romanian deadlift (dumbbell)',
+        'Single-leg RDL', 'Stiff-leg deadlift',
+        'Conventional deadlift', 'Sumo deadlift', 'Trap bar deadlift',
+        'Cable pull-through',
+      ] },
+      { name: 'Knee-flexion (lower hams)', items: [
+        'Lying leg curl', 'Seated leg curl', 'Standing leg curl', 'Single-leg curl',
+        'Nordic curl', 'Glute-ham raise',
+      ] },
+    ],
+  },
+  {
+    group: 'Glutes',
+    subgroups: [
+      { name: 'Glute max (extension / thrust)', items: [
+        'Hip thrust (barbell)', 'Hip thrust (machine)', 'Single-leg hip thrust',
+        'Glute bridge', 'Cable kickback',
+      ] },
+      { name: 'Glute med / abductors', items: [
+        'Cable abduction', 'Hip abduction (machine)', 'Banded side step', 'Clamshell',
+      ] },
+      { name: 'Squat-pattern (glute focus)', items: [
+        'Sumo squat', 'Cossack squat', 'Curtsy lunge',
+      ] },
+    ],
+  },
+  {
+    group: 'Calves',
+    subgroups: [
+      { name: 'Gastrocnemius (knee straight)', items: [
+        'Standing calf raise (machine)', 'Standing calf raise (smith)',
+        'Calf raise (leg press)', 'Single-leg calf raise (dumbbell)',
+        'Donkey calf raise',
+      ] },
+      { name: 'Soleus (knee bent)', items: [
+        'Seated calf raise (machine)', 'Seated calf raise (dumbbell)',
+      ] },
+    ],
+  },
+  {
+    group: 'Core',
+    subgroups: [
+      { name: 'Upper abs (flexion)', items: [
+        'Crunch', 'Cable crunch', 'Decline sit-up', 'Sit-up',
+        'Weighted crunch', 'V-up',
+      ] },
+      { name: 'Lower abs (hip flexion)', items: [
+        'Hanging leg raise', 'Hanging knee raise', "Captain's chair leg raise",
+        'Toes to bar', 'Reverse crunch', 'Lying leg raise', 'Garhammer raise',
+      ] },
+      { name: 'Anti-extension / stability', items: [
+        'Plank', 'Dead bug', 'Bird dog', 'Ab wheel rollout',
+        'Hollow body hold', 'L-sit hold',
+      ] },
+      { name: 'Obliques / rotational', items: [
+        'Russian twist', 'Side plank', 'Pallof press',
+        'Cable woodchopper', 'Cable rotation',
+        'Side bend (dumbbell)', 'Suitcase carry',
+      ] },
+    ],
+  },
+  {
+    group: 'Forearms / grip',
+    subgroups: [
+      { name: 'Flexors', items: [
+        'Wrist curl (barbell)', 'Wrist curl (dumbbell)', 'Behind-the-back wrist curl',
+      ] },
+      { name: 'Extensors', items: [
+        'Reverse wrist curl',
+      ] },
+      { name: 'Grip / carry', items: [
+        "Farmer's walk", 'Dead hang', 'Plate pinch', 'Forearm roller',
+      ] },
+    ],
+  },
+  {
+    group: 'Olympic / Power',
+    subgroups: [
+      { name: 'Snatch family', items: [
+        'Snatch', 'Power snatch', 'Hang snatch', 'Snatch pull', 'Snatch-grip high pull',
+      ] },
+      { name: 'Clean family', items: [
+        'Clean', 'Power clean', 'Hang clean', 'Clean pull', 'Clean high pull',
+      ] },
+      { name: 'Jerk', items: [
+        'Push jerk', 'Split jerk',
+      ] },
+      { name: 'Combined', items: [
+        'Clean and jerk',
+      ] },
+      { name: 'Power / speed', items: [
+        'Push press', 'Kettlebell swing',
+        'Box jump', 'Squat jump', 'Broad jump',
+        'Medicine ball slam', 'Medicine ball throw',
+      ] },
+    ],
+  },
 ]
 
-// Flat list of all catalog names (used to merge into autocomplete suggestions).
-export const CATALOG_NAMES = EXERCISE_CATALOG.flatMap(g => g.items)
+// Flat, deduped list of every catalog name (some exercises are
+// cross-listed in two groups, e.g. Landmine press appears under
+// Chest/Upper and Shoulders/Front delts). Used by the inline
+// autocomplete in ProgramSetup.
+export const CATALOG_NAMES = [
+  ...new Set(
+    EXERCISE_CATALOG.flatMap(g => g.subgroups.flatMap(sg => sg.items))
+  ),
+]

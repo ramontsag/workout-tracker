@@ -26,7 +26,7 @@ export default function ExercisePickerModal({ open, onClose, onPick, userKnownNa
   // — surfaced as a "Your exercises" group at the top.
   const yourExercises = useMemo(() => {
     const catalogLower = new Set(
-      EXERCISE_CATALOG.flatMap(g => g.items).map(n => n.toLowerCase())
+      EXERCISE_CATALOG.flatMap(g => g.subgroups.flatMap(sg => sg.items)).map(n => n.toLowerCase())
     )
     const seen = new Set()
     const out = []
@@ -39,9 +39,13 @@ export default function ExercisePickerModal({ open, onClose, onPick, userKnownNa
     return out.sort((a, b) => a.localeCompare(b))
   }, [userKnownNames])
 
+  // Normalize all groups to the same { group, subgroups: [{name, items}] } shape.
+  // "Your exercises" gets a single nameless subgroup so it renders flat.
   const groups = useMemo(() => {
     const all = []
-    if (yourExercises.length) all.push({ group: 'Your exercises', items: yourExercises })
+    if (yourExercises.length) {
+      all.push({ group: 'Your exercises', subgroups: [{ name: '', items: yourExercises }] })
+    }
     return [...all, ...EXERCISE_CATALOG]
   }, [yourExercises])
 
@@ -51,9 +55,11 @@ export default function ExercisePickerModal({ open, onClose, onPick, userKnownNa
     return groups
       .map(g => ({
         group: g.group,
-        items: g.items.filter(n => n.toLowerCase().includes(q)),
+        subgroups: g.subgroups
+          .map(sg => ({ ...sg, items: sg.items.filter(n => n.toLowerCase().includes(q)) }))
+          .filter(sg => sg.items.length > 0),
       }))
-      .filter(g => g.items.length > 0)
+      .filter(g => g.subgroups.length > 0)
   }, [q, groups])
 
   if (!open) return null
@@ -100,6 +106,7 @@ export default function ExercisePickerModal({ open, onClose, onPick, userKnownNa
 
           {filtered.map(g => {
             const isOpen = q ? true : openGroup === g.group
+            const totalItems = g.subgroups.reduce((n, sg) => n + sg.items.length, 0)
             return (
               <div key={g.group} className="picker-group">
                 <button
@@ -107,26 +114,31 @@ export default function ExercisePickerModal({ open, onClose, onPick, userKnownNa
                   onClick={() => !q && setOpenGroup(isOpen ? null : g.group)}
                 >
                   <span className="picker-group-name">{g.group}</span>
-                  <span className="picker-group-count">{g.items.length}</span>
+                  <span className="picker-group-count">{totalItems}</span>
                   {!q && <span className="picker-group-chev">{isOpen ? '▲' : '▼'}</span>}
                 </button>
                 {isOpen && (
                   <div className="picker-items">
-                    {g.items.map(name => {
-                      const taken = existingLower.has(name.toLowerCase())
-                      return (
-                        <button
-                          key={name}
-                          className={`picker-item${taken ? ' picker-item--taken' : ''}`}
-                          onClick={() => !taken && handlePick(name)}
-                          disabled={taken}
-                          title={taken ? 'Already on this day' : ''}
-                        >
-                          {name}
-                          {taken && <span className="picker-item-taken-tag">already on day</span>}
-                        </button>
-                      )
-                    })}
+                    {g.subgroups.map((sg, sgi) => (
+                      <div key={sg.name || `sg-${sgi}`} className="picker-subgroup">
+                        {sg.name && <div className="picker-subgroup-name">{sg.name}</div>}
+                        {sg.items.map(name => {
+                          const taken = existingLower.has(name.toLowerCase())
+                          return (
+                            <button
+                              key={name}
+                              className={`picker-item${taken ? ' picker-item--taken' : ''}`}
+                              onClick={() => !taken && handlePick(name)}
+                              disabled={taken}
+                              title={taken ? 'Already on this day' : ''}
+                            >
+                              {name}
+                              {taken && <span className="picker-item-taken-tag">already on day</span>}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
