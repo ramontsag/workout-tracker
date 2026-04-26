@@ -113,15 +113,27 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
 
   useEffect(() => {
     if (!userId) return
-    getBodyWeightLogs(userId, 1)
-      .then(logs => setLastWeight(logs[0] || null))
-      .catch(() => {})
-    getWeeklyProgress(userId)
-      .then(setWeeklyProgress)
-      .catch(e => console.warn('weekly progress failed:', e.message))
-    getInProgressDayIds(userId)
-      .then(setDraftDayIds)
-      .catch(() => {})
+    const refresh = () => {
+      getBodyWeightLogs(userId, 1)
+        .then(logs => setLastWeight(logs[0] || null))
+        .catch(() => {})
+      getWeeklyProgress(userId)
+        .then(setWeeklyProgress)
+        .catch(e => console.warn('weekly progress failed:', e.message))
+      getInProgressDayIds(userId)
+        .then(setDraftDayIds)
+        .catch(() => {})
+    }
+    refresh()
+    // Re-fetch when the tab becomes visible again — catches week rollovers
+    // (Monday 00:00) and stale data from the app being backgrounded.
+    const onVis = () => { if (!document.hidden) refresh() }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', refresh)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('focus', refresh)
+    }
   }, [userId])
 
   const handleDiscardDraft = async (dayId) => {
