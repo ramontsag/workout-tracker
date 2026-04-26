@@ -707,7 +707,36 @@ export async function getWeeklyProgress(uid) {
 
   const target       = profileRes.data?.weekly_target ?? 4
   const weekWorkouts = weekWorkoutsRes.data || []
-  const workoutCount = weekWorkouts.length
+  const workoutIds   = weekWorkouts.map(w => w.id)
+
+  // Pull every set logged within this week's workouts, then classify each
+  // row to count exercise sessions (1 per workout that contains any
+  // exercise/check rows) plus one count per activity row. Each activity in
+  // a day counts separately — 2 activities = +2.
+  let exerciseWorkoutCount = 0
+  let activityCount = 0
+  if (workoutIds.length) {
+    const { data: rows, error: setsErr } = await withTimeout(
+      supabase
+        .from('workout_sets')
+        .select('workout_id, weight_kg, reps, duration_min, distance_km, intensity, avg_hr, calories, rounds, elevation_m')
+        .in('workout_id', workoutIds),
+      5000, 'Load week sets'
+    )
+    if (setsErr) console.warn('weekly sets load:', setsErr.message)
+    const isActivity = (r) =>
+      (!r.weight_kg) && (!r.reps) && !!(
+        r.duration_min || r.distance_km || r.intensity ||
+        r.avg_hr || r.calories || r.rounds || r.elevation_m
+      )
+    const exerciseWorkouts = new Set()
+    for (const r of rows || []) {
+      if (isActivity(r)) activityCount++
+      else exerciseWorkouts.add(r.workout_id)
+    }
+    exerciseWorkoutCount = exerciseWorkouts.size
+  }
+  const completed = exerciseWorkoutCount + activityCount
 
   // Training day ids of all completed workouts this week — Home uses this to
   // mark each day card with a ✓.
@@ -715,10 +744,10 @@ export async function getWeeklyProgress(uid) {
     .map(w => w.training_day_id)
     .filter(Boolean)
 
-  // Each completed session = 1 unit of progress, regardless of what's inside it
   return {
-    completed: workoutCount, target,
-    workouts: workoutCount, activities: 0,
+    completed, target,
+    workouts: exerciseWorkoutCount,
+    activities: activityCount,
     completedDayIds,
   }
 }
