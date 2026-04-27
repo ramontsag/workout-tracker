@@ -10,6 +10,7 @@ import ProgressScreen  from './components/ProgressScreen'
 import ArchivesScreen  from './components/ArchivesScreen'
 import SettingsScreen  from './components/SettingsScreen'
 import FloatingTimer   from './components/FloatingTimer'
+import { stop as stopRestTimer } from './restTimerStore'
 
 // Screens: loading → auth → home
 //          home → workout → history → workout
@@ -105,14 +106,20 @@ export default function App() {
     return () => { clearTimeout(fallback); subscription.unsubscribe() }
   }, [loadProgram, loadProfile]) // eslint-disable-line
 
-  // Tap on the floating timer pill — jumps back to the day that started it.
-  // If activeDay was cleared (user fully navigated home), look up the day in
-  // the program by the id stored alongside the timer.
-  const handleFloatingTimerTap = (dayId) => {
-    if (activeDay && (!dayId || activeDay.id === dayId)) { go('workout'); return }
+  // Tap on the floating timer pill — jumps back to the workout that started
+  // it. Validates the day AND the block still exist in the current program;
+  // if either is gone (e.g. block was deleted via Edit Day after the timer
+  // started), stop the timer and stay put rather than landing on something stale.
+  const handleFloatingTimerTap = (dayId, blockId) => {
     const day = dayId ? program.find(d => d.id === dayId) : null
-    if (day) { setActiveDay(day); go('workout') }
-    else if (activeDay) go('workout')
+    if (!day) { stopRestTimer(); return }
+    const block = blockId
+      ? (day.workout_blocks || []).find(b => b.id === blockId)
+      : null
+    if (blockId && !block) { stopRestTimer(); return }
+    setActiveDay(day)
+    setActiveBlock(block || null)
+    go('workout')
   }
 
   // ── Render ────────────────────────────────────────────────────
@@ -174,6 +181,7 @@ export default function App() {
             if (hasActivities || multipleBlocks) { setActiveBlock(null); go('day') }
             else { setActiveDay(null); setActiveBlock(null); go('home') }
           }}
+          onCompleteHome={() => { setActiveDay(null); setActiveBlock(null); go('home') }}
           onHistory={exercise => { setActiveExercise(exercise); go('history') }}
           onProgramUpdated={refreshProgram}
         />

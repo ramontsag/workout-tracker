@@ -366,6 +366,7 @@ export async function saveProgram(days, uid) {
           : null,
         superset_group:   ex.item_type === 'exercise' ? (ex.superset_group || null) : null,
         workout_block_id: ex.item_type === 'exercise' ? (ex.workout_block_id || null) : null,
+        has_drop_sets:    ex.item_type === 'exercise' ? !!ex.has_drop_sets : false,
       })
     )
   }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { saveProgram, getAllKnownExerciseNames, deleteCustomItem, saveTemplate, deleteWorkoutBlock, updateWorkoutBlock } from '../supabase'
+import { getState as getRestTimerState, stop as stopRestTimer } from '../restTimerStore'
 import {
   FIELD_CATALOG, DEFAULT_ACTIVITY_FIELDS, defaultFieldsFor,
 } from '../data/commonActivities'
@@ -116,7 +117,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     const it = draft.exercises[idx]
     if (!it) return
     const label = it.item_type === 'activity' ? 'activity' : 'exercise'
-    if (!window.confirm(`Remove ${label} "${it.name}" from this day? Past logs are kept.`)) return
+    if (!window.confirm(`Remove ${label} "${it.name}" from this day? Past sessions keep their data, but anything logged in your current session for it will be discarded.`)) return
     setDraft(prev => ({
       ...prev,
       exercises: prev.exercises.filter((_, i) => i !== idx),
@@ -172,6 +173,15 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
 
   const setSetCount = (idx, n) =>
     updateItem(idx, { set_count: Math.max(1, Math.min(10, n)) })
+
+  const toggleDropSets = (idx) =>
+    setDraft(prev => ({
+      ...prev,
+      exercises: prev.exercises.map((it, i) => {
+        if (i !== idx || it.item_type === 'activity') return it
+        return { ...it, has_drop_sets: !it.has_drop_sets }
+      }),
+    }))
 
   // Cycle the superset group: none → A → B → C → none.
   // Activities never get a group — only barbell/dumbbell-style exercises.
@@ -237,6 +247,9 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     if (!window.confirm(`Delete "${block.name}" and all its exercises?`)) return
     try {
       await deleteWorkoutBlock(block.id, userId)
+      // Stop a running rest timer if it was tracking this block — otherwise
+      // the floating pill would point at a deleted workout.
+      if (getRestTimerState().blockId === block.id) stopRestTimer()
       // Drop the block's exercises from the local draft so the UI updates
       // before the parent refresh comes back.
       setDraft(prev => ({
@@ -335,6 +348,15 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                         title={isCheck ? 'Switch to Track' : 'Switch to Check'}
                       >
                         {isCheck ? 'Check' : 'Track'}
+                      </button>
+                    )}
+                    {!isActivity && !isCheck && (
+                      <button
+                        className={`item-drop-pill${it.has_drop_sets ? ' item-drop-pill--on' : ''}`}
+                        onClick={() => toggleDropSets(i)}
+                        title={it.has_drop_sets ? 'Drop sets enabled — tap to disable' : 'Enable drop sets for this exercise'}
+                      >
+                        {it.has_drop_sets ? '↓ Drop' : 'Drop'}
                       </button>
                     )}
                     {!isActivity && (

@@ -5,7 +5,7 @@ import { useRestTimer } from '../useRestTimer'
 // Tap to jump back to the workout that started it. Hides automatically when the
 // timer reaches 0 or is dismissed.
 export default function FloatingTimer({ onTap }) {
-  const { remaining, total, active, dayId } = useRestTimer()
+  const { remaining, total, active, dayId, blockId } = useRestTimer()
   if (!active || total === 0) return null
 
   const mins = Math.floor(remaining / 60)
@@ -17,7 +17,7 @@ export default function FloatingTimer({ onTap }) {
   return (
     <button
       className="floating-timer"
-      onClick={() => onTap?.(dayId)}
+      onClick={() => onTap?.(dayId, blockId)}
       title="Return to workout"
     >
       <span className="floating-timer-label">Rest {label}</span>

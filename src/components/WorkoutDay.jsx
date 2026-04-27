@@ -121,24 +121,93 @@ function RestTimer({ onDismiss, onReset }) {
 }
 
 // ── Progressive overload indicator ───────────────────────────
-// Warmup sets are excluded on both sides so a heavier warmup can't mask
-// a lighter real session and vice versa.
+// Cumulative volume comparison vs last session of the same training day.
+// Updates as sets are completed: first set today vs first set last week,
+// two sets vs two, etc. Warmups and drop sets are excluded on both sides.
+// Returns null (no arrow) until at least one working set is completed today,
+// or when volumes match — per the user's spec, no glyph for "same".
 function progressIndicator(sets, lastSets, unit) {
-  if (!lastSets || lastSets.length === 0) return null
-  const currentVol = sets.reduce((sum, s) => {
-    if (s.is_warmup) return sum
+  const todayDone = (sets || []).filter(s => !s.is_warmup && !s.is_drop_set && s.done)
+  const lastWork  = (lastSets || []).filter(s => !s.is_warmup && !s.is_drop_set)
+  if (todayDone.length === 0 || lastWork.length === 0) return null
+
+  const todayVol = todayDone.reduce((sum, s) => {
     const w = parseInputWeight(s.weight, unit); const r = parseInt(s.reps)
     return isNaN(w) || isNaN(r) ? sum : sum + w * r
   }, 0)
-  const lastVol = lastSets.reduce((sum, s) => {
-    if (s.is_warmup) return sum
+  const lastVol = lastWork.slice(0, todayDone.length).reduce((sum, s) => {
     const w = parseFloat(s.weight_kg); const r = parseInt(s.reps)
     return isNaN(w) || isNaN(r) ? sum : sum + w * r
   }, 0)
-  if (currentVol === 0 || lastVol === 0) return null
-  if (currentVol > lastVol)  return { label: '↑', cls: 'ex-progress--up' }
-  if (currentVol < lastVol)  return { label: '↓', cls: 'ex-progress--down' }
-  return { label: '→', cls: 'ex-progress--same' }
+  if (todayVol === 0 || lastVol === 0) return null
+  if (todayVol > lastVol) return { label: '↑', cls: 'ex-progress--up' }
+  if (todayVol < lastVol) return { label: '↓', cls: 'ex-progress--down' }
+  return null
+}
+
+// ── Post-workout summary modal ────────────────────────────────
+// Shown after Complete Workout saves successfully. Surfaces total volume,
+// total reps and sets, comparison vs last session, and any PRs hit. Tap
+// Done (or backdrop) to navigate home.
+function WorkoutSummary({ summary, unit, onClose }) {
+  if (!summary) return null
+  const label = unitLabel(unit)
+  const { totalVolKg, totalReps, totalSets, prs, volumeMsg } = summary
+  const headline = prs.length > 0
+    ? `🎉 ${prs.length} PR${prs.length === 1 ? '' : 's'} smashed!`
+    : 'Workout complete 💪'
+  const subline = prs.length === 0
+    ? 'Another rep in the bank — consistency is the lift.'
+    : null
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card workout-summary" onClick={e => e.stopPropagation()}>
+        <h3 className="modal-title summary-title">{headline}</h3>
+        {subline && <p className="summary-subline">{subline}</p>}
+        <div className="summary-stats">
+          <div className="summary-stat">
+            <div className="summary-stat__val">{fmt(displayWeight(totalVolKg, unit))}</div>
+            <div className="summary-stat__label">{label} lifted</div>
+          </div>
+          <div className="summary-stat">
+            <div className="summary-stat__val">{totalSets}</div>
+            <div className="summary-stat__label">{totalSets === 1 ? 'set' : 'sets'}</div>
+          </div>
+          <div className="summary-stat">
+            <div className="summary-stat__val">{totalReps}</div>
+            <div className="summary-stat__label">{totalReps === 1 ? 'rep' : 'reps'}</div>
+          </div>
+        </div>
+        {volumeMsg && <p className="summary-msg">{volumeMsg}</p>}
+        {prs.length > 0 && (
+          <div className="summary-prs">
+            {prs.map(pr => {
+              let icon, msg
+              if (pr.kind === 'weight') {
+                icon = '🏆'
+                msg = `New heaviest ${pr.exerciseName} — ${fmt(displayWeight(pr.currentWeightKg, unit))} ${label}`
+              } else if (pr.kind === 'reps') {
+                icon = '🔥'
+                msg = `Rep PR on ${pr.exerciseName} — ${pr.score} reps at ${fmt(displayWeight(pr.currentWeightKg, unit))} ${label}`
+              } else {
+                icon = '📈'
+                msg = `New estimated 1RM on ${pr.exerciseName} — ~${fmt(displayWeight(pr.score, unit))} ${label}`
+              }
+              return (
+                <div key={pr.exerciseName} className="summary-pr">
+                  <span className="summary-pr__icon">{icon}</span>
+                  <span className="summary-pr__msg">{msg}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button className="modal-btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ── PR popover ────────────────────────────────────────────────
@@ -191,8 +260,6 @@ function ExerciseCard({
         .join(' · ')
     : null
 
-  const [prOpenIdx, setPrOpenIdx] = useState(null)
-
   // Working-set numbering: drops and warmups don't increment.
   // Index → 1-based number for working sets, null for warmups/drops.
   const workingNumbers = []
@@ -236,7 +303,6 @@ function ExerciseCard({
         {sets.map((set, idx) => {
           const prev = lastSets[idx]
           const isDrop = !!set.is_drop_set
-          const isPRSet = prInfo && prInfo.setIdx === idx && !isDrop
           const showIntensity = intensityMode !== 'off' && !set.is_warmup && !isDrop
           const intensityField = intensityMode === 'rpe' ? 'rpe' : 'rir'
           const setLabel = isDrop ? '↓' : set.is_warmup ? 'W' : workingNumbers[idx]
@@ -294,13 +360,6 @@ function ExerciseCard({
                     aria-label="Toggle warmup"
                   >W</button>
                 )}
-                {isPRSet && (
-                  <button
-                    className="set-pr-badge"
-                    onClick={() => setPrOpenIdx(prOpenIdx === idx ? null : idx)}
-                    title="Personal record"
-                  >PR</button>
-                )}
                 <button
                   className={`set-tick${set.done ? ' set-tick--done' : ''}`}
                   onClick={() => onConfirm(idx)}
@@ -310,9 +369,6 @@ function ExerciseCard({
                   <button className="set-remove" onClick={() => onRemove(idx)}>×</button>
                 )}
               </div>
-              {isPRSet && prOpenIdx === idx && (
-                <PRPopover info={prInfo} unit={unit} onDismiss={() => setPrOpenIdx(null)} />
-              )}
               {prev && (prev.weight_kg || prev.reps) && !isDrop && (
                 <div className="set-prev">
                   {fmt(displayWeight(prev.weight_kg, unit))}{label} × {fmt(prev.reps)}
@@ -580,7 +636,7 @@ function CheckCard({ exercise, sets, onToggleCheck, onHistory, onRemoveExercise 
 // ── Main component ────────────────────────────────────────────
 // `block` is the workout_blocks row we're scoping to. If null/undefined
 // (legacy callers), we fall back to "all exercises in the day".
-export default function WorkoutDay({ day, program, userId, profile, onBack, onHistory, onProgramUpdated, block }) {
+export default function WorkoutDay({ day, program, userId, profile, onBack, onHistory, onProgramUpdated, onCompleteHome, block }) {
   const unit          = profile?.weight_unit    || 'kg'
   const intensityMode = profile?.intensity_mode || 'off'
   const blockId       = block?.id || null
@@ -647,6 +703,8 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   // Local completion state for the workout-block (only). Activities now live
   // on DayScreen and complete independently from there.
   const [workoutDoneAt, setWorkoutDoneAt] = useState(null)
+  // Post-workout summary modal payload. null = hidden.
+  const [summary, setSummary] = useState(null)
   const [timerEnabled, setTimerEnabled] = useState(true)
   const restSeconds = block?.rest_seconds ?? day.rest_seconds ?? 90
   const restTimer = useRestTimer()
@@ -832,6 +890,72 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     setPrFlags(newFlags)
   }, [sets, exerciseBests, unit])
 
+  // ── Reconcile prescription edits from EditDayModal into the live session ──
+  // When the user opens Edit Day mid-workout and saves (adds, removes, or
+  // changes properties on exercises), the parent re-fetches and `day.exercises`
+  // updates. We diff against the last-synced prescription so that:
+  //   - exercises added via Edit Day appear at the bottom with empty sets
+  //   - exercises removed via Edit Day drop out of the live list (the modal's
+  //     confirm dialog already warned the user that current-session logs are lost)
+  //   - exercises with property changes (target, set_count, track_mode,
+  //     superset_group) pick those up without clobbering already-logged sets
+  // Picker-added exercises during the session aren't in the lastSynced ref,
+  // so they're left alone by reconciliation.
+  const lastSyncedRef = useRef(null)
+  useEffect(() => {
+    const incoming = filterToBlock(day.exercises)
+    if (lastSyncedRef.current === null) {
+      lastSyncedRef.current = incoming
+      return
+    }
+    const lastSynced       = lastSyncedRef.current
+    const lastSyncedNames  = new Set(lastSynced.map(e => e.name))
+    const incomingNames    = new Set(incoming.map(e => e.name))
+    const adds             = incoming.filter(e => !lastSyncedNames.has(e.name))
+    const removeNames      = new Set(lastSynced.filter(e => !incomingNames.has(e.name)).map(e => e.name))
+    const incomingByName   = Object.fromEntries(incoming.map(e => [e.name, e]))
+    lastSyncedRef.current  = incoming
+
+    if (!adds.length && !removeNames.size) {
+      // Property-only updates: refresh fields on matching items.
+      setExerciseList(prev => prev.map(e =>
+        incomingByName[e.name] ? { ...e, ...incomingByName[e.name] } : e
+      ))
+      return
+    }
+
+    setExerciseList(prev => {
+      const filtered = prev
+        .filter(e => !removeNames.has(e.name))
+        .map(e => incomingByName[e.name] ? { ...e, ...incomingByName[e.name] } : e)
+      const filteredNames = new Set(filtered.map(e => e.name))
+      const newOnes = adds.filter(a => !filteredNames.has(a.name))
+      return [...filtered, ...newOnes]
+    })
+    if (adds.length) {
+      setSets(prev => {
+        const next = { ...prev }
+        for (const ex of adds) {
+          if (next[ex.name]) continue
+          if (ex.track_mode === 'check') {
+            const n = Math.max(1, ex.set_count ?? 1)
+            next[ex.name] = Array.from({ length: n }, () => makeEmptySet())
+          } else {
+            next[ex.name] = [makeEmptySet(), makeEmptySet()]
+          }
+        }
+        return next
+      })
+    }
+    if (removeNames.size) {
+      setSets(prev => {
+        const next = { ...prev }
+        for (const name of removeNames) delete next[name]
+        return next
+      })
+    }
+  }, [day.exercises]) // eslint-disable-line
+
   // ── Autosave (drafts) ─────────────────────────────────────
   // The live state is captured into a ref so flush handlers (visibility,
   // unmount) always see the latest values without re-binding on every keystroke.
@@ -932,7 +1056,7 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       ...prev,
       [exName]: prev[exName].map((s, i) => i === idx ? { ...s, done: true } : s),
     }))
-    if (timerEnabled) restTimer.start(restSeconds, day.id)
+    if (timerEnabled) restTimer.start(restSeconds, day.id, blockId)
   }
 
   const addSet = (exName) =>
@@ -970,7 +1094,7 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       ...prev,
       [exName]: prev[exName].map((s, i) => i === idx ? { ...s, checked: !s.checked } : s),
     }))
-    if (timerEnabled) restTimer.start(restSeconds, day.id)
+    if (timerEnabled) restTimer.start(restSeconds, day.id, blockId)
   }
 
   const getLastSets = (exName) => {
@@ -1172,6 +1296,32 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       setWorkoutDoneAt(workout.completed_at || new Date().toISOString())
       setStatus('saved')
 
+      // Build the summary payload for the celebration modal. Counts non-warmup,
+      // non-drop sets that have valid weight × reps (matching the volume calc).
+      let totalReps = 0
+      let totalSets = 0
+      for (const arr of Object.values(sets)) {
+        for (const s of arr) {
+          if (s.is_warmup || s.is_drop_set) continue
+          const w = parseInputWeight(s.weight, unit)
+          const r = parseInt(s.reps)
+          if (isNaN(w) || isNaN(r) || w <= 0 || r <= 0) continue
+          totalSets += 1
+          totalReps += r
+        }
+      }
+      const prsList = Object.entries(prFlags).map(([name, info]) => ({
+        exerciseName: name,
+        ...info,
+      }))
+      setSummary({
+        totalVolKg: currentVolKg,
+        totalReps,
+        totalSets,
+        prs:        prsList,
+        volumeMsg:  msg,
+      })
+
       // Workout is done — tear down the draft so we don't resume into an
       // already-saved session.
       clearLsDraft(lsKey)
@@ -1329,7 +1479,6 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                   sets={exSets}
                   onToggleCheck={idx => toggleCheck(item.name, idx)}
                   onHistory={() => onHistory(item.name)}
-                  onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
                 />
               )
             }
@@ -1348,9 +1497,8 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                 onRemove={idx => removeSet(item.name, idx)}
                 onHistory={() => onHistory(item.name)}
                 onToggleWarmup={idx => toggleWarmup(item.name, idx)}
-                onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
                 onCopyLast={() => copyLastSets(item.name)}
-                onAddDrop={(idx) => addDropSet(item.name, idx)}
+                onAddDrop={item.has_drop_sets ? (idx) => addDropSet(item.name, idx) : undefined}
               />
             )
           }
@@ -1377,10 +1525,6 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           }
           return out
         })()}
-
-        <div className="workout-add-row">
-          <button className="ex-browse-btn" onClick={() => openAddPicker('exercise')}>+ Add exercise</button>
-        </div>
 
         {errMsg && <p className="err-msg">{errMsg}</p>}
 
@@ -1568,6 +1712,17 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           </div>
         </div>
       )}
+
+      {/* ── Post-workout summary ─────────────────────────── */}
+      <WorkoutSummary
+        summary={summary}
+        unit={unit}
+        onClose={() => {
+          setSummary(null)
+          if (onCompleteHome) onCompleteHome()
+          else if (onBack) onBack()
+        }}
+      />
     </div>
   )
 }

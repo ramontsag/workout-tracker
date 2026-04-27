@@ -30,22 +30,24 @@ function writePersisted(data) {
 
 export function getState() {
   const p = readPersisted()
-  if (!p) return { active: false, remaining: 0, total: 0, dayId: null }
+  if (!p) return { active: false, remaining: 0, total: 0, dayId: null, blockId: null }
   const remaining = Math.max(0, Math.round((p.end_at - Date.now()) / 1000))
   return {
     active:    remaining > 0,
     remaining,
     total:     p.total || 0,
     dayId:     p.day_id || null,
+    blockId:   p.block_id || null,
   }
 }
 
-export function start(totalSeconds, dayId = null) {
+export function start(totalSeconds, dayId = null, blockId = null) {
   const total = Math.max(1, Math.floor(totalSeconds))
   writePersisted({
     end_at: Date.now() + total * 1000,
     total,
     day_id: dayId,
+    block_id: blockId,
   })
   ensureTicking()
   notify()
