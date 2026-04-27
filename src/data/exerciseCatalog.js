@@ -38,7 +38,7 @@ export const EXERCISE_CATALOG = [
       { name: 'Mid back (horizontal pull)', items: [
         'Barbell row (bent over)', 'Pendlay row', 'T-bar row',
         'Single-arm dumbbell row',
-        'Chest-supported row (machine)', 'Chest-supported row (dumbbell)',
+        'Chest-supported row (dumbbell)',
         'Seated cable row (wide)', 'Seated cable row (close)', 'Seated cable row (neutral)',
         'Single-arm cable row',
         'Machine row (low)', 'Machine row (high)',
