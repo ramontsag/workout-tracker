@@ -22,7 +22,7 @@ export const EXERCISE_CATALOG = [
       { name: 'Lower (decline)', items: [
         'Decline barbell press', 'Decline dumbbell press', 'Decline push-up',
         'Cable fly (high to low)',
-        'Dips (chest)', 'Weighted dips (chest)',
+        'Dips (chest)',
         'Dumbbell pullover',
       ] },
     ],
@@ -116,7 +116,7 @@ export const EXERCISE_CATALOG = [
       ] },
       { name: 'Compound (all heads)', items: [
         'Close-grip bench press', 'JM press', 'Tricep dips', 'Bench dips',
-        'Tricep extension machine',
+        'Dip machine', 'Tricep extension machine',
       ] },
     ],
   },

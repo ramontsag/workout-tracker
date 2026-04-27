@@ -82,6 +82,7 @@ function DayActivityCard({ item, log, unit, onUpdate, onComplete, doneAt, saving
                       type="number" inputMode="decimal"
                       value={log.duration_min ?? ''}
                       onChange={e => onUpdate('duration_min', e.target.value)}
+                      onFocus={e => e.target.select()}
                     />
                     <span className="activity-field-suffix">min</span>
                   </div>
@@ -96,6 +97,7 @@ function DayActivityCard({ item, log, unit, onUpdate, onComplete, doneAt, saving
                       type="number" inputMode="decimal" step="0.01"
                       value={log.distance_display ?? ''}
                       onChange={e => onUpdate('distance_display', e.target.value)}
+                      onFocus={e => e.target.select()}
                     />
                     <span className="activity-field-suffix">{distanceUnitLabel(unit)}</span>
                   </div>
@@ -110,6 +112,7 @@ function DayActivityCard({ item, log, unit, onUpdate, onComplete, doneAt, saving
                       type="number" inputMode="numeric"
                       value={log.avg_hr ?? ''}
                       onChange={e => onUpdate('avg_hr', e.target.value)}
+                      onFocus={e => e.target.select()}
                     />
                     <span className="activity-field-suffix">bpm</span>
                   </div>
@@ -124,6 +127,7 @@ function DayActivityCard({ item, log, unit, onUpdate, onComplete, doneAt, saving
                       type="number" inputMode="numeric"
                       value={log.calories ?? ''}
                       onChange={e => onUpdate('calories', e.target.value)}
+                      onFocus={e => e.target.select()}
                     />
                     <span className="activity-field-suffix">kcal</span>
                   </div>
@@ -138,6 +142,7 @@ function DayActivityCard({ item, log, unit, onUpdate, onComplete, doneAt, saving
                       type="number" inputMode="numeric"
                       value={log.rounds ?? ''}
                       onChange={e => onUpdate('rounds', e.target.value)}
+                      onFocus={e => e.target.select()}
                     />
                     <span className="activity-field-suffix">×</span>
                   </div>
@@ -152,6 +157,7 @@ function DayActivityCard({ item, log, unit, onUpdate, onComplete, doneAt, saving
                       type="number" inputMode="numeric"
                       value={log.elevation_display ?? ''}
                       onChange={e => onUpdate('elevation_display', e.target.value)}
+                      onFocus={e => e.target.select()}
                     />
                     <span className="activity-field-suffix">{elevationUnitLabel(unit)}</span>
                   </div>

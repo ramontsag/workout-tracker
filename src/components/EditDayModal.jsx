@@ -343,7 +343,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                         onClick={() => cycleGroup(i)}
                         title="Cycle superset group (none → A → B → C)"
                       >
-                        {it.superset_group ? `★${it.superset_group}` : 'Group'}
+                        {it.superset_group ? `★${it.superset_group}` : 'Superset'}
                       </button>
                     )}
                     <span className="ex-edit-name">{it.name}</span>
