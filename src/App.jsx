@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase, getProgram, getStats, getProfile, seedProgramIfMissing } from './supabase'
 import AuthScreen      from './components/AuthScreen'
 import Home            from './components/Home'
+import DayScreen       from './components/DayScreen'
 import WorkoutDay      from './components/WorkoutDay'
 import ExerciseHistory from './components/ExerciseHistory'
 import ProfileScreen   from './components/ProfileScreen'
@@ -20,6 +21,7 @@ export default function App() {
   const [user,            setUser]           = useState(null)
   const [program,         setProgram]        = useState([])
   const [activeDay,       setActiveDay]      = useState(null)
+  const [activeBlock,     setActiveBlock]    = useState(null)
   const [activeExercise,  setActiveExercise] = useState(null)
   const [totalWorkouts,   setTotalWorkouts]  = useState(null)
   const [totalActivities, setTotalActivities] = useState(null)
@@ -135,16 +137,43 @@ export default function App() {
       )
     }
 
-    if (screen === 'workout' && activeDay) {
-      // Re-derive activeDay from program so EditDayModal saves see the latest items.
+    if (screen === 'day' && activeDay) {
       const liveDay = program.find(d => d.id === activeDay.id) || activeDay
       return (
-        <WorkoutDay
+        <DayScreen
           day={liveDay}
           program={program}
           userId={user?.id}
           profile={profile}
-          onBack={() => { setActiveDay(null); go('home') }}
+          onBack={() => { setActiveDay(null); setActiveBlock(null); go('home') }}
+          onSelectWorkout={(block) => { setActiveBlock(block || null); go('workout') }}
+          onProgramUpdated={refreshProgram}
+        />
+      )
+    }
+
+    if (screen === 'workout' && activeDay) {
+      // Re-derive activeDay from program so EditDayModal saves see the latest items.
+      const liveDay = program.find(d => d.id === activeDay.id) || activeDay
+      // Back from a workout goes to DayScreen if the day has activities or
+      // multiple workout blocks; else straight home.
+      const hasActivities = (liveDay.exercises || []).some(e => e.item_type === 'activity')
+      const multipleBlocks = (liveDay.workout_blocks || []).length > 1
+      // Re-derive the live block too so renames / new exercises propagate.
+      const liveBlock = activeBlock
+        ? (liveDay.workout_blocks || []).find(b => b.id === activeBlock.id) || activeBlock
+        : null
+      return (
+        <WorkoutDay
+          day={liveDay}
+          block={liveBlock}
+          program={program}
+          userId={user?.id}
+          profile={profile}
+          onBack={() => {
+            if (hasActivities || multipleBlocks) { setActiveBlock(null); go('day') }
+            else { setActiveDay(null); setActiveBlock(null); go('home') }
+          }}
           onHistory={exercise => { setActiveExercise(exercise); go('history') }}
           onProgramUpdated={refreshProgram}
         />
@@ -202,7 +231,20 @@ export default function App() {
         program={program}
         userId={user?.id}
         profile={profile}
-        onSelectDay={day => { setActiveDay(day); go('workout') }}
+        onSelectDay={day => {
+          setActiveDay(day)
+          const hasActivities = (day.exercises || []).some(e => e.item_type === 'activity')
+          const blocks        = day.workout_blocks || []
+          // Single-workout, no-activities days skip straight into the only
+          // workout's session — fastest path to logging.
+          if (blocks.length === 1 && !hasActivities) {
+            setActiveBlock(blocks[0])
+            go('workout')
+          } else {
+            setActiveBlock(null)
+            go('day')
+          }
+        }}
         onProfile={() => go('profile')}
         onProgramUpdated={refreshProgram}
       />

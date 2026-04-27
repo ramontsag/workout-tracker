@@ -1,5 +1,53 @@
 import React, { useState, useEffect } from 'react'
-import { getProfile, signOut, saveWeeklyTarget, submitFeedback } from '../supabase'
+import { getProfile, signOut, saveWeeklyTarget, submitFeedback, getLatestBodyMeasurement, logBodyMeasurements } from '../supabase'
+import { displayLength, parseInputLength, lengthUnitLabel } from '../utils/units'
+
+// Body-measurement field config — drives both the form and the summary line.
+const MEASURE_SINGLE = [
+  { key: 'neck_cm',  label: 'Neck'   },
+  { key: 'chest_cm', label: 'Chest'  },
+  { key: 'waist_cm', label: 'Waist'  },
+  { key: 'glute_cm', label: 'Glutes' },
+]
+const MEASURE_PAIRED = [
+  { keyL: 'arm_left_cm',     keyR: 'arm_right_cm',     label: 'Arm'     },
+  { keyL: 'forearm_left_cm', keyR: 'forearm_right_cm', label: 'Forearm' },
+  { keyL: 'thigh_left_cm',   keyR: 'thigh_right_cm',   label: 'Thigh'   },
+  { keyL: 'calf_left_cm',    keyR: 'calf_right_cm',    label: 'Calf'    },
+]
+const ALL_MEASURE_KEYS = [
+  ...MEASURE_SINGLE.map(f => f.key),
+  ...MEASURE_PAIRED.flatMap(f => [f.keyL, f.keyR]),
+]
+
+function relTime(iso) {
+  if (!iso) return ''
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+  if (days <= 0)  return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 7)   return `${days}d ago`
+  if (days < 30)  return `${Math.floor(days / 7)}w ago`
+  return `${Math.floor(days / 30)}mo ago`
+}
+
+// Pick the first 2 fields with values for the collapsed summary.
+function measurementsSummary(last, unit) {
+  if (!last) return null
+  const lbl = lengthUnitLabel(unit)
+  const parts = []
+  for (const f of MEASURE_SINGLE) {
+    if (parts.length >= 2) break
+    if (last[f.key] != null) parts.push(`${f.label} ${displayLength(last[f.key], unit)}${lbl}`)
+  }
+  if (parts.length < 2) {
+    for (const f of MEASURE_PAIRED) {
+      if (parts.length >= 2) break
+      const v = last[f.keyL] ?? last[f.keyR]
+      if (v != null) parts.push(`${f.label} ${displayLength(v, unit)}${lbl}`)
+    }
+  }
+  return parts
+}
 
 export default function ProfileScreen({ user, totalWorkouts, totalActivities, onBack, onProgress, onArchives, onSettings }) {
   const [profile,        setProfile]       = useState(null)
@@ -11,15 +59,64 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
   const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle | saving | done | error
   const [feedbackError,  setFeedbackError] = useState('')
 
+  // Body measurements
+  const unit = profile?.weight_unit || 'kg'
+  const [lastMeasure,     setLastMeasure]     = useState(null)
+  const [showMeasureForm, setShowMeasureForm] = useState(false)
+  const [measureInputs,   setMeasureInputs]   = useState({})
+  const [measureNotes,    setMeasureNotes]    = useState('')
+  const [measureSaving,   setMeasureSaving]   = useState(false)
+  const [measureError,    setMeasureError]    = useState('')
+
   useEffect(() => {
     getProfile().then(p => {
       setProfile(p)
       if (p?.weekly_target != null) setWeeklyTarget(p.weekly_target)
     }).catch(() => {})
+    if (user?.id) {
+      getLatestBodyMeasurement(user.id).then(setLastMeasure).catch(() => {})
+    }
   }, [user?.id])
 
+  const handleLogMeasurements = async () => {
+    const payload = {}
+    let count = 0
+    for (const k of ALL_MEASURE_KEYS) {
+      const raw = measureInputs[k]
+      if (raw === '' || raw == null) continue
+      const cm = parseInputLength(raw, unit)
+      if (isNaN(cm) || cm <= 0) {
+        setMeasureError(`Invalid value for ${k.replace(/_cm$/, '').replace(/_/g, ' ')}`)
+        return
+      }
+      payload[k] = cm
+      count++
+    }
+    if (count === 0) {
+      setMeasureError('Fill in at least one measurement')
+      return
+    }
+    if (measureNotes.trim()) payload.notes = measureNotes.trim()
+
+    setMeasureSaving(true)
+    setMeasureError('')
+    try {
+      const saved = await logBodyMeasurements(payload, user.id)
+      setLastMeasure(saved)
+      setMeasureInputs({})
+      setMeasureNotes('')
+      setShowMeasureForm(false)
+    } catch (e) {
+      setMeasureError(e.message)
+    } finally {
+      setMeasureSaving(false)
+    }
+  }
+
   const handleTargetChange = async (delta) => {
-    const next = Math.max(1, Math.min(7, weeklyTarget + delta))
+    // Cap at 14 — sessions, not days. Activities count separately so users
+    // doing 1 lift + 1 activity per day can reach 14 sessions/week.
+    const next = Math.max(1, Math.min(14, weeklyTarget + delta))
     if (next === weeklyTarget || targetSaving) return
     setWeeklyTarget(next)
     setTargetSaving(true)
@@ -90,6 +187,106 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
           </div>
         </div>
 
+        {/* ── Measurements bar ───────────────────────────── */}
+        <div className="weight-bar measure-bar" style={{ margin: '12px 0 10px' }}>
+          <div className="weight-bar-inner">
+            <div className="weight-bar-left">
+              <div className="weight-bar-label">Body measurements</div>
+              <span className="weight-bar-reading">
+                {lastMeasure ? (() => {
+                  const parts = measurementsSummary(lastMeasure, unit)
+                  return (
+                    <>
+                      {parts && parts.length > 0 ? parts.join(' · ') : 'Logged'}
+                      {' '}<span className="weight-bar-dot">·</span>{' '}
+                      {relTime(lastMeasure.measured_at)}
+                    </>
+                  )
+                })() : <span className="weight-bar-empty">No log yet</span>}
+              </span>
+            </div>
+            <button
+              className={`weight-bar-btn ${showMeasureForm ? 'weight-bar-btn--cancel' : ''}`}
+              onClick={() => { setShowMeasureForm(f => !f); setMeasureError('') }}
+            >
+              {showMeasureForm ? 'Cancel' : 'LOG IT'}
+            </button>
+          </div>
+
+          {showMeasureForm && (
+            <div className="weight-bar-form measure-form">
+              {MEASURE_SINGLE.map(f => (
+                <div key={f.key} className="measure-row">
+                  <label className="measure-row__label">{f.label}</label>
+                  <input
+                    className="field-input measure-input"
+                    type="number"
+                    inputMode="decimal"
+                    step="0.1"
+                    placeholder={lengthUnitLabel(unit)}
+                    value={measureInputs[f.key] ?? ''}
+                    onChange={e => {
+                      const v = e.target.value
+                      setMeasureInputs(prev => ({ ...prev, [f.key]: v }))
+                      setMeasureError('')
+                    }}
+                  />
+                  <span className="measure-row__unit">{lengthUnitLabel(unit)}</span>
+                </div>
+              ))}
+              {MEASURE_PAIRED.map(f => (
+                <div key={f.keyL} className="measure-row measure-row--paired">
+                  <label className="measure-row__label">{f.label}</label>
+                  <span className="measure-row__side">L</span>
+                  <input
+                    className="field-input measure-input"
+                    type="number"
+                    inputMode="decimal"
+                    step="0.1"
+                    placeholder={lengthUnitLabel(unit)}
+                    value={measureInputs[f.keyL] ?? ''}
+                    onChange={e => {
+                      const v = e.target.value
+                      setMeasureInputs(prev => ({ ...prev, [f.keyL]: v }))
+                      setMeasureError('')
+                    }}
+                  />
+                  <span className="measure-row__side">R</span>
+                  <input
+                    className="field-input measure-input"
+                    type="number"
+                    inputMode="decimal"
+                    step="0.1"
+                    placeholder={lengthUnitLabel(unit)}
+                    value={measureInputs[f.keyR] ?? ''}
+                    onChange={e => {
+                      const v = e.target.value
+                      setMeasureInputs(prev => ({ ...prev, [f.keyR]: v }))
+                      setMeasureError('')
+                    }}
+                  />
+                  <span className="measure-row__unit">{lengthUnitLabel(unit)}</span>
+                </div>
+              ))}
+              <textarea
+                className="field-input measure-notes"
+                placeholder="Notes (optional)…"
+                value={measureNotes}
+                onChange={e => setMeasureNotes(e.target.value)}
+                rows={2}
+              />
+              {measureError && <div className="weight-bar-error">{measureError}</div>}
+              <button
+                className="weight-bar-save"
+                onClick={handleLogMeasurements}
+                disabled={measureSaving}
+              >
+                {measureSaving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Actions */}
         <div className="profile-actions">
           <button className="profile-action-btn" onClick={onProgress}>
@@ -135,7 +332,7 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
               <button
                 className="stepper-btn"
                 onClick={() => handleTargetChange(+1)}
-                disabled={weeklyTarget >= 7 || targetSaving}
+                disabled={weeklyTarget >= 14 || targetSaving}
                 aria-label="Increase target"
               >+</button>
             </div>

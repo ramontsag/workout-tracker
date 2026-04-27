@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { getBodyWeightLogs, logBodyWeight, getWeeklyProgress, getInProgressDayIds, discardDraft, getInProgressWorkout } from '../supabase'
+import { getBodyWeightLogs, logBodyWeight, getWeeklyProgress, getInProgressDayIds } from '../supabase'
 import { displayWeight, parseInputWeight, unitLabel } from '../utils/units'
 import EditDayModal from './EditDayModal'
 
@@ -136,21 +136,6 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
     }
   }, [userId])
 
-  const handleDiscardDraft = async (dayId) => {
-    try {
-      const draft = await getInProgressWorkout(dayId, userId)
-      if (draft) await discardDraft(draft.id, userId)
-    } catch { /* non-fatal */ }
-    // Clear the local cache so the next open starts fresh.
-    try { window.localStorage.removeItem(`wt:draft:${userId}:${dayId}`) } catch {}
-    setDraftDayIds(prev => {
-      const next = new Set(prev)
-      next.delete(dayId)
-      return next
-    })
-    setPendingDay(null)
-  }
-
   const handleLogWeight = async () => {
     const kg = parseInputWeight(weightInput, unit)
     if (isNaN(kg) || kg <= 0) { setError('Enter a valid weight'); return }
@@ -174,7 +159,6 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
     }
   }
 
-  const [pendingDay, setPendingDay] = useState(null)
   const [editDay,    setEditDay]    = useState(null)
 
   const sorted = program.filter(d => DAY_ORDER.includes(d.name)).sort((a, b) => {
@@ -281,33 +265,58 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
         )}
       </div>
 
+
       {/* ── Day grid ────────────────────────────────────── */}
       {sorted.length === 0 ? (
         <div className="state-msg">No days set up yet.</div>
       ) : (
         <div className="day-grid">
           {sorted.map((day, i) => {
-            const isToday  = day.name.toLowerCase() === today.toLowerCase()
-            const items    = day.exercises || []
-            const exCount  = items.filter(e => e.item_type !== 'activity').length
-            const actCount = items.filter(e => e.item_type === 'activity').length
-            const isEmpty  = items.length === 0
-            const isGymDay = !isEmpty && exCount >= actCount
+            const isToday   = day.name.toLowerCase() === today.toLowerCase()
+            const items     = day.exercises || []
+            const blocks    = day.workout_blocks || []
+            const exItems   = items.filter(e => e.item_type !== 'activity')
+            const actItems  = items.filter(e => e.item_type === 'activity')
+            const exCount   = exItems.length
+            const actCount  = actItems.length
+            // A day "has workouts" if any workout_block has exercises in it,
+            // OR (legacy) if there are exercises but no blocks structure yet.
+            const populatedBlocks = blocks.filter(b => (b.exercises || []).length > 0)
+            const blockCount = populatedBlocks.length || (exCount > 0 ? 1 : 0)
+            const isEmpty    = exCount === 0 && actCount === 0
+            const isHybrid   = blockCount > 0 && actCount > 0
+            const isGymOnly  = blockCount > 0 && actCount === 0
+            const isActOnly  = blockCount === 0 && actCount > 0
+
+            // Title: hybrid → "Hybrid"; workout-only → join block names;
+            // activity-only → join activity names; empty → "Rest day".
+            let dayTitle
+            if (isEmpty)        dayTitle = 'Rest day'
+            else if (isHybrid)  dayTitle = 'Hybrid'
+            else if (isGymOnly) dayTitle = populatedBlocks.length
+              ? populatedBlocks.map(b => b.name).join(' · ')
+              : (day.focus?.trim() || 'Workout')
+            else                dayTitle = actItems.map(a => a.name).join(' · ')
 
             let countLabel
-            if (exCount > 0 && actCount > 0)
-              countLabel = `${exCount} lift${exCount !== 1 ? 's' : ''} · ${actCount} activit${actCount !== 1 ? 'ies' : 'y'}`
-            else if (exCount > 0)
+            if (isHybrid)
+              countLabel = `${blockCount} workout${blockCount !== 1 ? 's' : ''} · ${actCount} activit${actCount !== 1 ? 'ies' : 'y'}`
+            else if (isGymOnly && blockCount > 1)
+              countLabel = `${blockCount} workouts · ${exCount} lift${exCount !== 1 ? 's' : ''}`
+            else if (isGymOnly)
               countLabel = `${exCount} lift${exCount !== 1 ? 's' : ''}`
-            else if (actCount > 0)
+            else if (isActOnly)
               countLabel = `${actCount} activit${actCount !== 1 ? 'ies' : 'y'}`
             else
-              countLabel = 'Rest day'
+              countLabel = ''
 
-            const typeClass     = isEmpty ? 'day-card--empty' : isGymDay ? 'day-card--gym' : 'day-card--rest'
-            const indicatorType = isEmpty ? 'empty' : isGymDay ? 'gym' : 'rest'
-            const hasDraft      = draftDayIds.has(day.id)
-            const isDone        = !!weeklyProgress?.completedDayIds?.includes(day.id)
+            const indicatorType = isEmpty ? 'empty'
+              : isHybrid ? 'hybrid'
+              : isGymOnly ? 'gym'
+              : 'rest'
+            const typeClass = `day-card--${indicatorType}`
+            const hasDraft  = draftDayIds.has(day.id)
+            const isDone    = !!weeklyProgress?.completedDayIds?.includes(day.id)
 
             return (
               <div
@@ -316,15 +325,9 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                 style={{ animationDelay: `${i * 50}ms` }}
                 role="button"
                 tabIndex={0}
-                onClick={() => isToday ? onSelectDay(day) : setPendingDay(day)}
-                onKeyDown={(e) => { if (e.key === 'Enter') (isToday ? onSelectDay(day) : setPendingDay(day)) }}
+                onClick={() => onSelectDay(day)}
+                onKeyDown={(e) => { if (e.key === 'Enter') onSelectDay(day) }}
               >
-                {hasDraft && (
-                  <span className="day-card__draft-dot" title="Unfinished workout" aria-label="In progress" />
-                )}
-                {isDone && (
-                  <span className={`day-card__done-mark day-card__done-mark--${indicatorType}`} title="Completed this week" aria-label="Completed">✓</span>
-                )}
                 {isToday && (
                   <div className={`day-card__stripe day-card__stripe--${indicatorType}`}>
                     <span className="day-card__abbr">{DAY_ABBREV[day.name] || day.name.slice(0, 3).toUpperCase()}</span>
@@ -341,15 +344,17 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                       title="Edit day"
                     >Edit</button>
                   </div>
-                  {day.focus
-                    ? <div className="day-card__focus">{day.focus}</div>
-                    : (!isGymDay && !isEmpty && <div className="day-card__focus">rest / move</div>)
-                  }
-                  <div className="day-card__count">{countLabel}</div>
+                  <div className="day-card__focus">{dayTitle}</div>
+                  {countLabel && <div className="day-card__count">{countLabel}</div>}
                 </div>
                 <div className="day-card__indicator-wrap">
-                  <div className={`day-card__indicator-circle day-card__indicator-circle--${indicatorType}`}>
-                    <div className="day-card__indicator-dash" />
+                  <div className={`day-card__indicator-circle day-card__indicator-circle--${indicatorType}${isDone ? ' day-card__indicator-circle--done' : ''}`}
+                    title={isDone ? 'Completed this week' : undefined}
+                    aria-label={isDone ? 'Completed' : undefined}
+                  >
+                    {isDone
+                      ? <span className="day-card__indicator-check">✓</span>
+                      : <div className="day-card__indicator-dash" />}
                   </div>
                 </div>
               </div>
@@ -371,35 +376,6 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
         />
       )}
 
-      {pendingDay && (
-        <div className="makeup-overlay" onClick={() => setPendingDay(null)}>
-          <div className="makeup-sheet" onClick={e => e.stopPropagation()}>
-            <div className="makeup-sheet__title">
-              {pendingDay.name}{pendingDay.focus ? <span className="makeup-sheet__focus"> — {pendingDay.focus}</span> : null}
-            </div>
-            <div className="makeup-sheet__sub">
-              {draftDayIds.has(pendingDay.id)
-                ? 'You have an unfinished workout for this day.'
-                : `Logging for today, ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}`}
-            </div>
-            <div className="makeup-sheet__btns">
-              <button className="makeup-sheet__go" onClick={() => { onSelectDay(pendingDay); setPendingDay(null) }}>
-                {draftDayIds.has(pendingDay.id)
-                  ? `Resume ${pendingDay.name}'s Workout`
-                  : `Start ${pendingDay.name}'s Workout`}
-              </button>
-              {draftDayIds.has(pendingDay.id) && (
-                <button className="makeup-sheet__discard" onClick={() => handleDiscardDraft(pendingDay.id)}>
-                  Discard unfinished workout
-                </button>
-              )}
-              <button className="makeup-sheet__cancel" onClick={() => setPendingDay(null)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

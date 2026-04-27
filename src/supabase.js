@@ -162,7 +162,7 @@ export async function getProgram() {
   // Query both tables in parallel.
   // activity_days may or may not still exist (depends on whether
   // migrate_unified.sql has been run). The catch makes it non-fatal.
-  const [trainingResult, activityResult] = await Promise.all([
+  const [trainingResult, activityResult, blocksResult] = await Promise.all([
     withTimeout(
       supabase.from('training_days').select('*, exercises(*)').order('sort_order', { ascending: true }),
       5000, 'Load training days'
@@ -171,28 +171,73 @@ export async function getProgram() {
       supabase.from('activity_days').select('*, activity_types(*)').order('sort_order', { ascending: true }),
       5000, 'Load activity days'
     ).catch(() => ({ data: null, error: null })),
+    withTimeout(
+      supabase.from('workout_blocks').select('*').order('sort_order', { ascending: true }),
+      5000, 'Load workout blocks'
+    ).catch(() => ({ data: null, error: null })),
   ])
 
   if (trainingResult.error) throw new Error(`Could not load program: ${trainingResult.error.message}`)
 
-  const trainingDays = (trainingResult.data || []).map(day => ({
-    id:           day.id,
-    name:         day.name,
-    focus:        day.focus,
-    color:        day.color,
-    sort_order:   day.sort_order,
-    rest_seconds: day.rest_seconds ?? 90,
-    exercises:    (day.exercises || [])
+  const blocksByDay = {}
+  for (const b of blocksResult.data || []) {
+    if (!blocksByDay[b.training_day_id]) blocksByDay[b.training_day_id] = []
+    blocksByDay[b.training_day_id].push(b)
+  }
+
+  const trainingDays = (trainingResult.data || []).map(day => {
+    const allExercises = (day.exercises || [])
       .sort((a, b) => a.sort_order - b.sort_order)
       .map(e => ({
-        name:            e.name,
-        target:          e.target || '',
-        item_type:       e.item_type || 'exercise',
-        track_mode:      e.track_mode || 'sets',
-        set_count:       e.set_count ?? null,
-        activity_fields: Array.isArray(e.activity_fields) ? e.activity_fields : null,
-      })),
-  }))
+        id:               e.id,
+        name:             e.name,
+        target:           e.target || '',
+        item_type:        e.item_type || 'exercise',
+        track_mode:       e.track_mode || 'sets',
+        set_count:        e.set_count ?? null,
+        activity_fields:  Array.isArray(e.activity_fields) ? e.activity_fields : null,
+        superset_group:   e.superset_group || null,
+        workout_block_id: e.workout_block_id || null,
+      }))
+
+    // Group the exercise items into named workout blocks. Activities are
+    // never in a block. If an exercise has no block_id (legacy or pre-backfill
+    // edge case) it lands in a synthetic 'Workout' block keyed by null.
+    const dayBlocks = (blocksByDay[day.id] || [])
+      .sort((a, b) => a.sort_order - b.sort_order || new Date(a.created_at) - new Date(b.created_at))
+      .map(b => ({
+        id:           b.id,
+        name:         b.name,
+        sort_order:   b.sort_order,
+        rest_seconds: b.rest_seconds ?? day.rest_seconds ?? 90,
+        exercises:    allExercises.filter(e =>
+          e.item_type !== 'activity' && e.workout_block_id === b.id
+        ),
+      }))
+    const orphanExercises = allExercises.filter(e =>
+      e.item_type !== 'activity' && !e.workout_block_id
+    )
+    if (orphanExercises.length) {
+      // No block exists yet — surface as an unnamed default block so the UI
+      // still renders. createWorkoutBlock will be called when the user edits.
+      dayBlocks.unshift({
+        id: null, name: day.focus || 'Workout', sort_order: -1,
+        rest_seconds: day.rest_seconds ?? 90,
+        exercises: orphanExercises,
+      })
+    }
+
+    return {
+      id:             day.id,
+      name:           day.name,
+      focus:          day.focus,
+      color:          day.color,
+      sort_order:     day.sort_order,
+      rest_seconds:   day.rest_seconds ?? 90,
+      exercises:      allExercises,           // legacy flat list (still used by some callers)
+      workout_blocks: dayBlocks,              // new: structured per-block
+    }
+  })
 
   // Names already covered by training_days — used to skip duplicates
   // after migration_unified.sql copies activity_days into training_days.
@@ -201,14 +246,15 @@ export async function getProgram() {
   const activityDays = (activityResult.data || [])
     .filter(day => !trainingNames.has(day.name.toLowerCase()))
     .map(day => ({
-      id:         day.id,
-      name:       day.name,
-      focus:      '',
-      color:      day.color,
-      sort_order: day.sort_order,
-      exercises:  (day.activity_types || [])
+      id:             day.id,
+      name:           day.name,
+      focus:          '',
+      color:          day.color,
+      sort_order:     day.sort_order,
+      exercises:      (day.activity_types || [])
         .sort((a, b) => a.sort_order - b.sort_order)
         .map(a => ({ name: a.name, target: '', item_type: 'activity' })),
+      workout_blocks: [],
     }))
 
   return [...trainingDays, ...activityDays]
@@ -307,17 +353,19 @@ export async function saveProgram(days, uid) {
     if (!dayId) continue
     day.exercises.forEach((ex, j) =>
       allExercises.push({
-        user_id:         uid,
-        training_day_id: dayId,
-        name:            ex.name,
-        target:          ex.target || '',
-        item_type:       ex.item_type || 'exercise',
-        track_mode:      ex.item_type === 'exercise' ? (ex.track_mode || 'sets') : 'sets',
-        set_count:       ex.track_mode === 'check' ? (ex.set_count ?? 1) : null,
-        sort_order:      j,
-        activity_fields: ex.item_type === 'activity' && Array.isArray(ex.activity_fields)
+        user_id:          uid,
+        training_day_id:  dayId,
+        name:             ex.name,
+        target:           ex.target || '',
+        item_type:        ex.item_type || 'exercise',
+        track_mode:       ex.item_type === 'exercise' ? (ex.track_mode || 'sets') : 'sets',
+        set_count:        ex.track_mode === 'check' ? (ex.set_count ?? 1) : null,
+        sort_order:       j,
+        activity_fields:  ex.item_type === 'activity' && Array.isArray(ex.activity_fields)
           ? ex.activity_fields
           : null,
+        superset_group:   ex.item_type === 'exercise' ? (ex.superset_group || null) : null,
+        workout_block_id: ex.item_type === 'exercise' ? (ex.workout_block_id || null) : null,
       })
     )
   }
@@ -364,20 +412,19 @@ export async function getLastSession(trainingDayId) {
 // queries clean and preserves the exact strings the user typed
 // (e.g. blank reps stays blank, not "0").
 
-// Returns the in-progress workout for this training day, if any.
+// Returns the in-progress workout for this (training day, block), if any.
+// blockId is required to avoid resuming a sibling block's draft.
 // Shape: { id, day_name, started_at, updated_at, draft_state } | null
-export async function getInProgressWorkout(trainingDayId, uid) {
+export async function getInProgressWorkout(trainingDayId, blockId, uid) {
   if (!uid) throw new Error('Not authenticated')
-  const { data, error } = await withTimeout(
-    supabase
-      .from('workouts')
-      .select('id, day_name, started_at, updated_at, draft_state')
-      .eq('user_id', uid)
-      .eq('training_day_id', trainingDayId)
-      .eq('status', 'in_progress')
-      .limit(1),
-    5000, 'Load in-progress workout'
-  )
+  let q = supabase
+    .from('workouts')
+    .select('id, day_name, started_at, updated_at, draft_state, workout_block_id')
+    .eq('user_id', uid)
+    .eq('training_day_id', trainingDayId)
+    .eq('status', 'in_progress')
+  q = blockId ? q.eq('workout_block_id', blockId) : q.is('workout_block_id', null)
+  const { data, error } = await withTimeout(q.limit(1), 5000, 'Load in-progress workout')
   if (error) throw new Error(`Load draft failed: ${error.message}`)
   return data?.[0] || null
 }
@@ -385,7 +432,7 @@ export async function getInProgressWorkout(trainingDayId, uid) {
 // Insert (workoutId omitted) or update (workoutId provided) the draft.
 // draftState is whatever JSON-serialisable shape the caller wants to
 // restore on resume — typically { sets, activityLogs, exerciseList }.
-export async function upsertDraft({ workoutId, trainingDayId, dayLabel, draftState }, uid) {
+export async function upsertDraft({ workoutId, trainingDayId, workoutBlockId = null, dayLabel, draftState }, uid) {
   if (!uid) throw new Error('Not authenticated')
 
   if (workoutId) {
@@ -408,13 +455,14 @@ export async function upsertDraft({ workoutId, trainingDayId, dayLabel, draftSta
     supabase
       .from('workouts')
       .insert({
-        user_id:         uid,
-        training_day_id: trainingDayId,
-        day_name:        dayLabel,
-        status:          'in_progress',
-        started_at:      nowIso,
-        updated_at:      nowIso,
-        draft_state:     draftState,
+        user_id:          uid,
+        training_day_id:  trainingDayId,
+        workout_block_id: workoutBlockId,
+        day_name:         dayLabel,
+        status:           'in_progress',
+        started_at:       nowIso,
+        updated_at:       nowIso,
+        draft_state:      draftState,
       })
       .select('id, started_at, updated_at')
       .single(),
@@ -422,6 +470,117 @@ export async function upsertDraft({ workoutId, trainingDayId, dayLabel, draftSta
   )
   if (error) throw new Error(`Create draft failed: ${error.message}`)
   return data
+}
+
+// Insert a brand-new completed workouts row + its workout_sets rows.
+// Used by per-section completion (e.g. "Mark activity complete") so each
+// session lives as its own row independent of the day's draft. The existing
+// in-progress draft row is NOT touched.
+//
+// kind='workout': persists exerciseSets only.
+// kind='activity', activityName='Run': persists ONLY that activity's log.
+export async function insertCompletedSession(
+  { trainingDayId, dayLabel, kind = 'workout', activityName = null,
+    workoutBlockId = null,
+    exerciseSets = {}, activityLogs = {}, trackModeMap = {} },
+  uid,
+) {
+  if (!uid)             throw new Error('Not authenticated')
+  if (!trainingDayId)   throw new Error('No day id')
+
+  const completedAt = new Date().toISOString()
+  const { data: workout, error: wErr } = await withTimeout(
+    supabase.from('workouts').insert({
+      user_id:          uid,
+      training_day_id:  trainingDayId,
+      day_name:         dayLabel,
+      status:           'completed',
+      kind,
+      activity_name:    kind === 'activity' ? activityName : null,
+      workout_block_id: kind === 'workout' ? workoutBlockId : null,
+      started_at:       completedAt,
+      completed_at:     completedAt,
+      updated_at:       completedAt,
+    }).select().single(),
+    5000, 'Save session',
+  )
+  if (wErr) throw new Error(`Save session failed: ${wErr.message}`)
+
+  // Reuse the same row-building logic as completeWorkout but tied to the new id.
+  const rowsToInsert = []
+  const persistExercises = kind === 'workout'
+  const persistActivities = kind === 'activity'
+    ? Object.fromEntries(
+        Object.entries(activityLogs).filter(([name]) => name === activityName)
+      )
+    : {}
+
+  if (persistExercises) for (const [exerciseName, sets] of Object.entries(exerciseSets)) {
+    const isCheck = trackModeMap[exerciseName] === 'check'
+    sets.forEach((set, idx) => {
+      if (isCheck) {
+        if (!set.checked) return
+        rowsToInsert.push({
+          user_id: uid, workout_id: workout.id, exercise_name: exerciseName,
+          set_number: idx + 1, weight_kg: 0, reps: 0, checked: true,
+          notes: '', is_warmup: false, rir: null, rpe: null,
+        })
+        return
+      }
+      const w = typeof set.weight_kg === 'number' ? set.weight_kg : parseFloat(set.weight_kg)
+      const r = parseInt(set.reps)
+      if (!isNaN(w) || !isNaN(r)) {
+        const rir = set.rir === '' || set.rir == null ? null : parseFloat(set.rir)
+        const rpe = set.rpe === '' || set.rpe == null ? null : parseFloat(set.rpe)
+        rowsToInsert.push({
+          user_id: uid, workout_id: workout.id, exercise_name: exerciseName,
+          set_number: idx + 1,
+          weight_kg: isNaN(w) ? 0 : w, reps: isNaN(r) ? 0 : r,
+          checked: false, notes: '',
+          is_warmup: !!set.is_warmup, is_drop_set: !!set.is_drop_set,
+          rir: isNaN(rir) ? null : rir, rpe: isNaN(rpe) ? null : rpe,
+        })
+      }
+    })
+  }
+
+  const numOrNull = (v) => {
+    if (v === '' || v == null) return null
+    const n = typeof v === 'number' ? v : parseFloat(v); return isNaN(n) ? null : n
+  }
+  const intOrNull = (v) => {
+    if (v === '' || v == null) return null
+    const n = typeof v === 'number' ? v : parseInt(v); return isNaN(n) ? null : n
+  }
+  for (const [actName, log] of Object.entries(persistActivities)) {
+    const duration = numOrNull(log.duration_min)
+    const distance = numOrNull(log.distance_km)
+    const intensity = intOrNull(log.intensity)
+    const avgHr = intOrNull(log.avg_hr)
+    const cals = numOrNull(log.calories)
+    const rnds = intOrNull(log.rounds)
+    const elev = numOrNull(log.elevation_m)
+    const notes = log.notes || ''
+    const hasAny = !!log.checked || notes.length > 0 ||
+      [duration, distance, intensity, avgHr, cals, rnds, elev].some(v => v != null)
+    if (!hasAny) continue
+    rowsToInsert.push({
+      user_id: uid, workout_id: workout.id, exercise_name: actName,
+      set_number: 1, weight_kg: 0, reps: 0, checked: !!log.checked, notes,
+      duration_min: duration, distance_km: distance, intensity,
+      avg_hr: avgHr, calories: cals, rounds: rnds, elevation_m: elev,
+    })
+  }
+
+  if (rowsToInsert.length) {
+    const { error: sErr } = await withTimeout(
+      supabase.from('workout_sets').insert(rowsToInsert),
+      5000, 'Save session sets',
+    )
+    if (sErr) throw new Error(`Save sets failed: ${sErr.message}`)
+  }
+
+  return workout
 }
 
 // Delete a draft (cascades workout_sets — though drafts shouldn't have any).
@@ -437,6 +596,28 @@ export async function discardDraft(workoutId, uid) {
     5000, 'Discard draft'
   )
   if (error) throw new Error(`Discard failed: ${error.message}`)
+}
+
+// Returns the completed workouts rows (kind + activity_name + completed_at)
+// for a given training_day_id since the start of this calendar week (Monday
+// 00:00 local). DayScreen uses this to mark each card done/in-progress on
+// re-entry.
+export async function getCompletedSessionsThisWeek(uid, trainingDayId) {
+  if (!uid) throw new Error('Not authenticated')
+  if (!trainingDayId) return []
+  const weekStart = getWeekStart()
+  const { data, error } = await withTimeout(
+    supabase
+      .from('workouts')
+      .select('id, kind, activity_name, workout_block_id, completed_at')
+      .eq('user_id', uid)
+      .eq('training_day_id', trainingDayId)
+      .eq('status', 'completed')
+      .gte('completed_at', weekStart),
+    5000, 'Load day sessions'
+  )
+  if (error) throw new Error(`Load day sessions failed: ${error.message}`)
+  return data || []
 }
 
 // Returns training_day_ids that have an in-progress workout.
@@ -455,8 +636,9 @@ export async function getInProgressDayIds(uid) {
   return new Set((data || []).map(r => r.training_day_id))
 }
 
-// Add a single exercise row to an existing training day. Used by the
-// "Also update program" toggle when the user adds an exercise mid-workout.
+// Add a single exercise row to an existing training day. Used by the mid-
+// workout "+ Add exercise" flow. payload.workout_block_id is required for
+// item_type='exercise'; activities have block_id NULL.
 export async function addExerciseToProgram(trainingDayId, payload, uid) {
   if (!uid) throw new Error('Not authenticated')
   const { data: existing } = await withTimeout(
@@ -469,21 +651,112 @@ export async function addExerciseToProgram(trainingDayId, payload, uid) {
     5000, 'Load max sort_order'
   )
   const nextSort = (existing?.[0]?.sort_order ?? -1) + 1
+  const isActivity = payload.item_type === 'activity'
   const { error } = await withTimeout(
     supabase.from('exercises').insert({
-      user_id:         uid,
-      training_day_id: trainingDayId,
-      name:            payload.name,
-      target:          payload.target || '',
-      item_type:       payload.item_type || 'exercise',
-      sort_order:      nextSort,
-      activity_fields: payload.item_type === 'activity' && Array.isArray(payload.activity_fields)
+      user_id:          uid,
+      training_day_id:  trainingDayId,
+      name:             payload.name,
+      target:           payload.target || '',
+      item_type:        payload.item_type || 'exercise',
+      sort_order:       nextSort,
+      activity_fields:  isActivity && Array.isArray(payload.activity_fields)
         ? payload.activity_fields
         : null,
+      superset_group:   !isActivity ? (payload.superset_group || null) : null,
+      workout_block_id: !isActivity ? (payload.workout_block_id || null) : null,
     }),
     5000, 'Add exercise to program'
   )
   if (error) throw new Error(`Add to program failed: ${error.message}`)
+}
+
+// ── Workout blocks ────────────────────────────────────────────
+// A workout_block groups exercises under a name. Each training_day can have
+// 1+ blocks; activities live outside blocks. Multi-workout days have multiple
+// blocks; single-workout days have one (auto-backfilled).
+
+export async function createWorkoutBlock(trainingDayId, name, uid, opts = {}) {
+  if (!uid)            throw new Error('Not authenticated')
+  if (!trainingDayId)  throw new Error('No day id')
+  // Insert at the end of the day's existing blocks.
+  const { data: existing } = await withTimeout(
+    supabase.from('workout_blocks').select('sort_order')
+      .eq('training_day_id', trainingDayId)
+      .order('sort_order', { ascending: false })
+      .limit(1),
+    5000, 'Load max block sort'
+  )
+  const nextSort = (existing?.[0]?.sort_order ?? -1) + 1
+  const { data, error } = await withTimeout(
+    supabase.from('workout_blocks').insert({
+      user_id:         uid,
+      training_day_id: trainingDayId,
+      name:            (name || 'Workout').trim() || 'Workout',
+      sort_order:      nextSort,
+    }).select().single(),
+    5000, 'Create workout block'
+  )
+  if (error) throw new Error(`Create block failed: ${error.message}`)
+
+  // Optional: seed exercises from a template's saved exercises.
+  if (opts.fromTemplateId) {
+    try {
+      const { data: tex } = await withTimeout(
+        supabase.from('template_exercises').select('*')
+          .eq('template_id', opts.fromTemplateId)
+          .order('sort_order', { ascending: true }),
+        5000, 'Load template'
+      )
+      if (tex?.length) {
+        const exRows = tex
+          .filter(e => (e.item_type || 'exercise') !== 'activity')
+          .map((e, i) => ({
+            user_id:          uid,
+            training_day_id:  trainingDayId,
+            workout_block_id: data.id,
+            name:             e.exercise_name,
+            target:           e.target || '',
+            item_type:        'exercise',
+            sort_order:       i,
+          }))
+        if (exRows.length) {
+          await withTimeout(
+            supabase.from('exercises').insert(exRows),
+            5000, 'Seed block from template'
+          )
+        }
+      }
+    } catch (e) {
+      // Non-fatal: the block is created, just empty.
+      console.warn('[createWorkoutBlock] template seed failed:', e.message)
+    }
+  }
+
+  return data
+}
+
+export async function updateWorkoutBlock(blockId, fields, uid) {
+  if (!uid)     throw new Error('Not authenticated')
+  if (!blockId) throw new Error('No block id')
+  const { error } = await withTimeout(
+    supabase.from('workout_blocks').update(fields)
+      .eq('id', blockId).eq('user_id', uid),
+    5000, 'Update block'
+  )
+  if (error) throw new Error(`Update block failed: ${error.message}`)
+}
+
+export async function deleteWorkoutBlock(blockId, uid) {
+  if (!uid)     throw new Error('Not authenticated')
+  if (!blockId) throw new Error('No block id')
+  // FK CASCADE on exercises.workout_block_id wipes the block's exercises.
+  const { error } = await withTimeout(
+    supabase.from('workout_blocks').delete()
+      .eq('id', blockId).eq('user_id', uid),
+    5000, 'Delete block'
+  )
+  if (error) throw new Error(`Delete block failed: ${error.message}`)
 }
 
 // Remove an exercise row by name (case-insensitive) from a training day.
@@ -511,15 +784,36 @@ export async function removeExerciseFromProgram(trainingDayId, exerciseName, uid
 // activityLogs:  { [name]: { checked, notes, duration_min, distance_km,
 //                            intensity, avg_hr, calories, rounds, elevation_m } }
 //   distance/elevation already canonicalized to km/m by caller.
-export async function completeWorkout(workoutId, dayLabel, exerciseSets, activityLogs, uid, trackModeMap = {}) {
+//
+// kind / activityName control what kind of session this is, and which slice
+// of the input is actually persisted:
+//   - kind='workout' (default): persists the exerciseSets, ignores activityLogs.
+//   - kind='activity', activityName='Run': persists ONLY the matching activity
+//     log; ignores exerciseSets and the rest of activityLogs.
+// The draft row is flipped to completed with the matching kind/activity_name
+// so each session shows up as its own row in history.
+export async function completeWorkout(
+  workoutId, dayLabel, exerciseSets, activityLogs, uid, trackModeMap = {},
+  kind = 'workout', activityName = null,
+) {
   if (!uid) throw new Error('Not authenticated')
   if (!workoutId) throw new Error('No workout id')
 
   const rowsToInsert = []
 
+  // Workout-kind sessions persist the gym block (exercise sets); activity-kind
+  // sessions persist only the named activity. This keeps each kind's history
+  // clean and lets the user complete them independently.
+  const persistExercises = kind === 'workout'
+  const persistActivities = kind === 'activity'
+    ? Object.fromEntries(
+        Object.entries(activityLogs).filter(([name]) => name === activityName)
+      )
+    : (kind === 'workout' ? {} : activityLogs)
+
   // Exercise items — one row per set.
   // Check-mode exercises store one row per ticked checkbox (weight=0, reps=0, checked=true).
-  for (const [exerciseName, sets] of Object.entries(exerciseSets)) {
+  if (persistExercises) for (const [exerciseName, sets] of Object.entries(exerciseSets)) {
     const isCheck = trackModeMap[exerciseName] === 'check'
     sets.forEach((set, idx) => {
       if (isCheck) {
@@ -554,6 +848,7 @@ export async function completeWorkout(workoutId, dayLabel, exerciseSets, activit
           checked:       false,
           notes:         '',
           is_warmup:     !!set.is_warmup,
+          is_drop_set:   !!set.is_drop_set,
           rir:           isNaN(rir) ? null : rir,
           rpe:           isNaN(rpe) ? null : rpe,
         })
@@ -572,7 +867,7 @@ export async function completeWorkout(workoutId, dayLabel, exerciseSets, activit
     const n = typeof v === 'number' ? v : parseInt(v)
     return isNaN(n) ? null : n
   }
-  for (const [activityName, log] of Object.entries(activityLogs)) {
+  for (const [activityName, log] of Object.entries(persistActivities)) {
     const duration = numOrNull(log.duration_min)
     const distance = numOrNull(log.distance_km)
     const intensity = intOrNull(log.intensity)
@@ -619,11 +914,13 @@ export async function completeWorkout(workoutId, dayLabel, exerciseSets, activit
     supabase
       .from('workouts')
       .update({
-        status:       'completed',
-        day_name:     dayLabel,
-        completed_at: completedAt,
-        updated_at:   completedAt,
-        draft_state:  null,
+        status:        'completed',
+        day_name:      dayLabel,
+        completed_at:  completedAt,
+        updated_at:    completedAt,
+        draft_state:   null,
+        kind,
+        activity_name: kind === 'activity' ? activityName : null,
       })
       .eq('id', workoutId)
       .eq('user_id', uid)
@@ -861,6 +1158,141 @@ export async function getBodyWeightLogs(uid, limit = 20) {
   return data || []
 }
 
+// ── Main lifts (Strength tab) ─────────────────────────────────
+
+// Saves the user's main-lift slot mapping to profiles.main_lifts (JSONB).
+// `slots` shape: [{ slot: 'Bench', exercise: 'Barbell bench press' }, ...]
+// Caller is responsible for capping at 1–6 entries; we just persist whatever
+// we're given.
+export async function saveMainLifts(slots, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const cleaned = (slots || [])
+    .map(s => ({ slot: (s.slot || '').trim(), exercise: (s.exercise || '').trim() }))
+    .filter(s => s.slot && s.exercise)
+  const { error } = await withTimeout(
+    supabase.from('profiles').upsert({ id: uid, main_lifts: cleaned }, { onConflict: 'id' }),
+    5000, 'Save main lifts'
+  )
+  if (error) throw new Error(`Save main lifts failed: ${error.message}`)
+  return cleaned
+}
+
+// Returns a per-workout strength time series for the supplied exercise names.
+// Each point carries the *best e1RM so far* per exercise (so the line ratchets
+// up on PRs and never drops just because a session skipped a lift) plus the
+// summed total. Output is sorted oldest → newest.
+//
+// Shape: [{ date: ISO, perExercise: { [name]: e1RMkg }, totalE1RM: kg }]
+export async function getStrengthHistory(uid, exerciseNames) {
+  if (!uid) throw new Error('Not authenticated')
+  if (!exerciseNames?.length) return []
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from('workout_sets')
+      .select('exercise_name, weight_kg, reps, workout:workouts(id, completed_at)')
+      .eq('user_id', uid)
+      .in('exercise_name', exerciseNames)
+      .gt('weight_kg', 0)
+      .gt('reps', 0)
+      .eq('is_warmup', false)
+      .eq('is_drop_set', false),
+    7000, 'Load strength history'
+  )
+  if (error) throw new Error(`Load strength failed: ${error.message}`)
+
+  // Reduce to one entry per (workout, exercise) — keeping the max e1RM that
+  // workout produced for that lift.
+  const byWorkout = {}  // { workoutId: { date, ex: { name: maxE1RMkg } } }
+  for (const row of data || []) {
+    const wid = row.workout?.id
+    if (!wid) continue
+    const w = Number(row.weight_kg)
+    const r = Number(row.reps)
+    const e1rm = w * (1 + r / 30)
+    if (!byWorkout[wid]) byWorkout[wid] = { date: row.workout.completed_at, ex: {} }
+    const ex = byWorkout[wid].ex
+    if (!ex[row.exercise_name] || e1rm > ex[row.exercise_name]) {
+      ex[row.exercise_name] = e1rm
+    }
+  }
+
+  const workouts = Object.values(byWorkout)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+
+  const bestSoFar = {}
+  exerciseNames.forEach(n => { bestSoFar[n] = 0 })
+
+  const series = []
+  for (const w of workouts) {
+    for (const [name, e1rm] of Object.entries(w.ex)) {
+      if (e1rm > (bestSoFar[name] || 0)) bestSoFar[name] = e1rm
+    }
+    series.push({
+      date:        w.date,
+      perExercise: { ...bestSoFar },
+      totalE1RM:   Object.values(bestSoFar).reduce((a, b) => a + b, 0),
+    })
+  }
+  return series
+}
+
+// ── Body Measurements ─────────────────────────────────────────
+
+// fields: object keyed by *_cm column names. Empty/null fields are dropped
+// before insert so the row only stores what was actually measured.
+export async function logBodyMeasurements(fields, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const payload = { user_id: uid }
+  for (const [k, v] of Object.entries(fields || {})) {
+    if (v === '' || v == null) continue
+    if (k === 'notes') { payload.notes = v; continue }
+    if (typeof v === 'number' && !isNaN(v)) payload[k] = v
+  }
+  // Sanity: caller should pre-validate at least one measurement, but the
+  // DB CHECK will reject an all-null insert too.
+  const { data, error } = await withTimeout(
+    supabase.from('body_measurements').insert(payload).select().single(),
+    5000, 'Save measurements'
+  )
+  if (error) throw new Error(`Save measurements failed: ${error.message}`)
+  return data
+}
+
+// Newest measurement row for this user, or null.
+export async function getLatestBodyMeasurement(uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data, error } = await withTimeout(
+    supabase
+      .from('body_measurements')
+      .select('*')
+      .eq('user_id', uid)
+      .order('measured_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    5000, 'Load latest measurements'
+  )
+  if (error) return null
+  return data
+}
+
+// All measurements newest-first (capped). Used by the Progress > Body view
+// to chart any single field over time.
+export async function getBodyMeasurements(uid, limit = 52) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data, error } = await withTimeout(
+    supabase
+      .from('body_measurements')
+      .select('*')
+      .eq('user_id', uid)
+      .order('measured_at', { ascending: false })
+      .limit(limit),
+    5000, 'Load measurements history'
+  )
+  if (error) throw new Error(`Load measurements failed: ${error.message}`)
+  return data || []
+}
+
 // ── Feedback ──────────────────────────────────────────────────
 
 export async function submitFeedback(message, uid) {
@@ -997,7 +1429,7 @@ export async function getExerciseBests(exerciseNames, uid) {
   const { data, error } = await withTimeout(
     supabase
       .from('workout_sets')
-      .select('exercise_name, weight_kg, reps, is_warmup')
+      .select('exercise_name, weight_kg, reps, is_warmup, is_drop_set')
       .eq('user_id', uid)
       .in('exercise_name', exerciseNames)
       .gt('weight_kg', 0)
@@ -1008,7 +1440,7 @@ export async function getExerciseBests(exerciseNames, uid) {
 
   const bests = {}
   for (const row of (data || [])) {
-    if (row.is_warmup) continue
+    if (row.is_warmup || row.is_drop_set) continue
     const name = row.exercise_name
     const w = Number(row.weight_kg)
     const r = Number(row.reps)
@@ -1082,15 +1514,17 @@ export async function getAllKnownExerciseNames(uid) {
   return [...seen.values()].sort((a, b) => a.localeCompare(b))
 }
 
-// Returns volume per session for a given exercise, newest first.
-// Volume = sum(weight_kg * reps) across all working sets in that workout.
-// Warmup sets are excluded so the user's progress chart reflects real work.
-export async function getVolumeHistory(exerciseName, uid, limit = 10) {
+// Returns volume + max e1RM per session for a given exercise, newest first.
+// Volume = sum(weight_kg * reps) across all working sets (warmups excluded;
+// drop sets ARE included — they're real work).
+// maxE1RMkg = best Epley estimate that session (warmups + drops both excluded
+// since drops aren't real top-set strength).
+export async function getVolumeHistory(exerciseName, uid, limit = 200) {
   if (!uid) throw new Error('Not authenticated')
   const { data, error } = await withTimeout(
     supabase
       .from('workout_sets')
-      .select('weight_kg, reps, is_warmup, workout:workouts(id, completed_at, day_name)')
+      .select('weight_kg, reps, is_warmup, is_drop_set, workout:workouts(id, completed_at, day_name)')
       .eq('exercise_name', exerciseName)
       .eq('user_id', uid)
       .order('workout_id', { ascending: false }),
@@ -1098,21 +1532,27 @@ export async function getVolumeHistory(exerciseName, uid, limit = 10) {
   )
   if (error) throw new Error(`Load volume failed: ${error.message}`)
 
-  // Group rows by workout, sum volume per session (excluding warmups)
   const byWorkout = {}
   for (const row of data || []) {
     if (row.is_warmup) continue
     const wid = row.workout?.id
     if (!wid) continue
+    const w = Number(row.weight_kg || 0)
+    const r = Number(row.reps || 0)
     if (!byWorkout[wid]) {
       byWorkout[wid] = {
         workoutId:   wid,
         date:        row.workout.completed_at,
         dayName:     row.workout.day_name,
         totalVolume: 0,
+        maxE1RMkg:   0,
       }
     }
-    byWorkout[wid].totalVolume += (row.weight_kg || 0) * (row.reps || 0)
+    byWorkout[wid].totalVolume += w * r
+    if (!row.is_drop_set && w > 0 && r > 0) {
+      const e1rm = w * (1 + r / 30)
+      if (e1rm > byWorkout[wid].maxE1RMkg) byWorkout[wid].maxE1RMkg = e1rm
+    }
   }
 
   return Object.values(byWorkout)

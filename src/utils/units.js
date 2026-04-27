@@ -70,3 +70,30 @@ export function parseInputElevation(raw, unit) {
   if (isNaN(n)) return NaN
   return unit === 'lbs' ? feetToMeters(n) : n
 }
+
+// ── Body measurements (cm ↔ in) ─────────────────────────────
+// DB stores cm. lbs users see inches.
+const CM_PER_INCH = 2.54
+
+export const cmToInches    = (cm) => cm / CM_PER_INCH
+export const inchesToCm    = (inches) => inches * CM_PER_INCH
+export const lengthUnitLabel = (unit) => (unit === 'lbs' ? 'in' : 'cm')
+
+export function displayLength(cm, unit) {
+  if (cm == null || cm === '' || isNaN(cm)) return ''
+  const val = unit === 'lbs' ? cmToInches(Number(cm)) : Number(cm)
+  const rounded = Math.round(val * 10) / 10
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
+}
+
+export function parseInputLength(raw, unit) {
+  const n = parseFloat(raw)
+  if (isNaN(n)) return NaN
+  return unit === 'lbs' ? inchesToCm(n) : n
+}
+
+// kg-input-style helper for prefilling: cm (or null) → user-unit string.
+export function cmToInputValue(cm, unit) {
+  if (cm == null || cm === 0 || cm === '') return ''
+  return displayLength(cm, unit)
+}

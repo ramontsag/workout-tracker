@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
-  getLastSession, completeWorkout, getPreviousSessionVolume, saveTemplate, getExerciseBests,
+  getLastSession, getPreviousSessionVolume, saveTemplate, getExerciseBests,
   getInProgressWorkout, upsertDraft, discardDraft,
   addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames,
-  updateDayMeta, deleteCustomItem,
+  updateDayMeta, updateWorkoutBlock, deleteCustomItem,
+  insertCompletedSession,
 } from '../supabase'
 import {
-  displayWeight, parseInputWeight, unitLabel,
+  displayWeight, parseInputWeight, unitLabel, kgToInputValue,
   displayDistance, parseInputDistance, distanceUnitLabel,
   displayElevation, parseInputElevation, elevationUnitLabel,
 } from '../utils/units'
@@ -179,18 +180,27 @@ function PRPopover({ info, unit, onDismiss }) {
 function ExerciseCard({
   exercise, sets, lastSets, prInfo, unit, intensityMode,
   onUpdate, onConfirm, onAdd, onRemove, onHistory, onToggleWarmup,
-  onRemoveExercise,
+  onRemoveExercise, onCopyLast, onAddDrop,
 }) {
   const prog = progressIndicator(sets, lastSets, unit)
   const label = unitLabel(unit)
   const lastSummary = lastSets.length > 0
     ? lastSets
-        .filter(s => !s.is_warmup)
+        .filter(s => !s.is_warmup && !s.is_drop_set)
         .map(s => `${fmt(displayWeight(s.weight_kg, unit))}${label}×${fmt(s.reps)}`)
         .join(' · ')
     : null
 
   const [prOpenIdx, setPrOpenIdx] = useState(null)
+
+  // Working-set numbering: drops and warmups don't increment.
+  // Index → 1-based number for working sets, null for warmups/drops.
+  const workingNumbers = []
+  let _wn = 0
+  sets.forEach((s, i) => {
+    if (!s.is_warmup && !s.is_drop_set) { _wn++; workingNumbers[i] = _wn }
+    else workingNumbers[i] = null
+  })
 
   return (
     <div className="ex-card">
@@ -209,19 +219,31 @@ function ExerciseCard({
       </div>
 
       {lastSummary && (
-        <div className="ex-last-summary">Last time: {lastSummary}</div>
+        <div className="ex-last-summary">
+          <span className="ex-last-summary__text">Last time: {lastSummary}</span>
+          {onCopyLast && (
+            <button
+              type="button"
+              className="ex-copy-btn"
+              onClick={onCopyLast}
+              title="Pre-fill empty sets with last session's values"
+            >Copy</button>
+          )}
+        </div>
       )}
 
       <div className="sets-list">
         {sets.map((set, idx) => {
           const prev = lastSets[idx]
-          const isPRSet = prInfo && prInfo.setIdx === idx
-          const showIntensity = intensityMode !== 'off' && !set.is_warmup
+          const isDrop = !!set.is_drop_set
+          const isPRSet = prInfo && prInfo.setIdx === idx && !isDrop
+          const showIntensity = intensityMode !== 'off' && !set.is_warmup && !isDrop
           const intensityField = intensityMode === 'rpe' ? 'rpe' : 'rir'
+          const setLabel = isDrop ? '↓' : set.is_warmup ? 'W' : workingNumbers[idx]
           return (
             <div key={idx} className="set-item">
-              <div className={`set-row${set.done ? ' set-row--done' : ''}${set.is_warmup ? ' set-row--warmup' : ''}`}>
-                <span className="set-num">{set.is_warmup ? 'W' : idx + 1}</span>
+              <div className={`set-row${set.done ? ' set-row--done' : ''}${set.is_warmup ? ' set-row--warmup' : ''}${isDrop ? ' set-row--drop' : ''}`}>
+                <span className="set-num">{setLabel}</span>
                 <div className="set-input-group">
                   <input
                     className="set-input"
@@ -246,18 +268,29 @@ function ExerciseCard({
                       type="number"
                       inputMode="decimal"
                       step="0.5"
+                      min="0"
+                      max="10"
                       placeholder={intensityField.toUpperCase()}
                       value={set[intensityField] ?? ''}
-                      onChange={e => onUpdate(idx, intensityField, e.target.value)}
+                      onChange={e => {
+                        const v = e.target.value
+                        if (v === '') return onUpdate(idx, intensityField, '')
+                        const n = parseFloat(v)
+                        if (isNaN(n)) return
+                        const clamped = Math.max(0, Math.min(10, n))
+                        onUpdate(idx, intensityField, String(clamped))
+                      }}
                     />
                   )}
                 </div>
-                <button
-                  className={`set-warmup-chip${set.is_warmup ? ' set-warmup-chip--on' : ''}`}
-                  onClick={() => onToggleWarmup(idx)}
-                  title={set.is_warmup ? 'Warmup — tap to unmark' : 'Mark as warmup'}
-                  aria-label="Toggle warmup"
-                >W</button>
+                {!isDrop && (
+                  <button
+                    className={`set-warmup-chip${set.is_warmup ? ' set-warmup-chip--on' : ''}`}
+                    onClick={() => onToggleWarmup(idx)}
+                    title={set.is_warmup ? 'Warmup — tap to unmark' : 'Mark as warmup'}
+                    aria-label="Toggle warmup"
+                  >W</button>
+                )}
                 {isPRSet && (
                   <button
                     className="set-pr-badge"
@@ -277,11 +310,19 @@ function ExerciseCard({
               {isPRSet && prOpenIdx === idx && (
                 <PRPopover info={prInfo} unit={unit} onDismiss={() => setPrOpenIdx(null)} />
               )}
-              {prev && (prev.weight_kg || prev.reps) && (
+              {prev && (prev.weight_kg || prev.reps) && !isDrop && (
                 <div className="set-prev">
                   {fmt(displayWeight(prev.weight_kg, unit))}{label} × {fmt(prev.reps)}
                   {prev.is_warmup && <span className="set-prev-warmup"> (warmup)</span>}
                 </div>
+              )}
+              {/* + Drop appears after any ticked non-warmup set so chains are easy. */}
+              {set.done && !set.is_warmup && onAddDrop && (
+                <button
+                  className="add-drop-btn"
+                  onClick={() => onAddDrop(idx)}
+                  title="Add a drop set"
+                >+ Drop</button>
               )}
             </div>
           )
@@ -296,7 +337,7 @@ function ExerciseCard({
 // ── Activity item card — configured fields inline ─────────────
 // `item.activity_fields` is the user's selection (array of field keys).
 // Backwards-compat: if null/undefined, falls back to checkbox + notes only.
-function ActivityCard({ item, log, unit, lastLog, onToggle, onUpdate, onRemoveExercise }) {
+function ActivityCard({ item, log, unit, lastLog, onToggle, onUpdate, onRemoveExercise, onComplete, doneAt, saving }) {
   const fields = item.activity_fields || DEFAULT_ACTIVITY_FIELDS
   const has = (k) => fields.includes(k)
 
@@ -319,10 +360,11 @@ function ActivityCard({ item, log, unit, lastLog, onToggle, onUpdate, onRemoveEx
       summaryParts.push(`${displayElevation(lastLog.elevation_m, unit)} ${elevationUnitLabel(unit)}`)
   }
 
+  const isDone = !!doneAt
   return (
-    <div className="ex-card activity-item-card">
+    <div className={`ex-card activity-item-card${isDone ? ' activity-item-card--done' : ''}`}>
       <div className="activity-row-wrap">
-        <button className="activity-row" onClick={onToggle}>
+        <button className="activity-row" onClick={onToggle} disabled={isDone}>
           <div
             className={`activity-checkbox ${log.checked ? 'activity-checkbox--checked' : ''}`}
             style={log.checked ? { background: 'var(--success)', borderColor: 'var(--success)' } : {}}
@@ -462,7 +504,25 @@ function ActivityCard({ item, log, unit, lastLog, onToggle, onUpdate, onRemoveEx
           value={log.notes || ''}
           onChange={e => onUpdate('notes', e.target.value)}
           rows={2}
+          disabled={isDone}
         />
+      )}
+
+      {/* Per-activity completion — saves this activity as its own session. */}
+      {onComplete && (
+        isDone ? (
+          <div className="activity-done-row">
+            <span className="activity-done-pill">
+              ✓ Completed{doneAt ? ` ${new Date(doneAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}
+            </span>
+          </div>
+        ) : (
+          <button
+            className="activity-complete-btn"
+            onClick={onComplete}
+            disabled={saving}
+          >{saving ? 'Saving…' : `Mark ${item.name} done`}</button>
+        )
       )}
     </div>
   )
@@ -509,11 +569,15 @@ function CheckCard({ exercise, sets, onToggleCheck, onHistory, onRemoveExercise 
 }
 
 // ── Main component ────────────────────────────────────────────
-export default function WorkoutDay({ day, program, userId, profile, onBack, onHistory, onProgramUpdated }) {
+// `block` is the workout_blocks row we're scoping to. If null/undefined
+// (legacy callers), we fall back to "all exercises in the day".
+export default function WorkoutDay({ day, program, userId, profile, onBack, onHistory, onProgramUpdated, block }) {
   const unit          = profile?.weight_unit    || 'kg'
   const intensityMode = profile?.intensity_mode || 'off'
+  const blockId       = block?.id || null
+  const blockName     = block?.name || day?.focus || 'Workout'
 
-  const makeEmptySet = () => ({ weight: '', reps: '', done: false, is_warmup: false, rir: '', rpe: '', checked: false })
+  const makeEmptySet = () => ({ weight: '', reps: '', done: false, is_warmup: false, rir: '', rpe: '', checked: false, is_drop_set: false })
   // Activity log shape includes display-unit fields for distance/elevation
   // (distance_display, elevation_display) — we convert to canonical km/m at
   // save time so the DB always stores metric.
@@ -523,18 +587,24 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     avg_hr: '', calories: '', rounds: '', elevation_display: '',
   })
 
-  // Local-storage cache key (synchronous mirror of the draft, see readLsDraft).
-  // null until userId arrives — handlers no-op when null.
-  const lsKey  = userId ? lsKeyFor(userId, day.id) : null
+  // Local-storage cache key — scoped per (user, day, block) so multi-workout
+  // drafts on the same day don't trample each other.
+  const lsKey  = userId ? `wt:draft:${userId}:${day.id}:${blockId || 'default'}` : null
   const cached = lsKey ? readLsDraft(lsKey) : null
 
-  // Live exercise list — starts from the program but can be mutated mid-workout.
-  // Render and state lookups all use this, not day.exercises directly.
+  // Filter the day's exercises to JUST this block. Exercises with no block_id
+  // (orphans / legacy) only show up if blockId is null.
+  const filterToBlock = (xs) => (xs || []).filter(e => {
+    if (e.item_type === 'activity') return false
+    if (blockId)  return e.workout_block_id === blockId
+    return !e.workout_block_id
+  })
+
   const [exerciseList, setExerciseList] = useState(() =>
-    Array.isArray(cached?.exerciseList) ? cached.exerciseList : day.exercises
+    Array.isArray(cached?.exerciseList) ? cached.exerciseList : filterToBlock(day.exercises)
   )
-  const exerciseItems = exerciseList.filter(e => e.item_type !== 'activity')
-  const activityItems = exerciseList.filter(e => e.item_type === 'activity')
+  const exerciseItems = exerciseList  // already activity-free
+  const activityItems = []  // kept as empty for any leftover references
 
   const [sets, setSets] = useState(() =>
     cached?.sets && typeof cached.sets === 'object'
@@ -564,8 +634,12 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   const [status,      setStatus]      = useState('idle') // idle | saving | saved
   const [errMsg,      setErrMsg]      = useState('')
   const [volumeMsg,   setVolumeMsg]   = useState('')
+
+  // Local completion state for the workout-block (only). Activities now live
+  // on DayScreen and complete independently from there.
+  const [workoutDoneAt, setWorkoutDoneAt] = useState(null)
   const [timerEnabled, setTimerEnabled] = useState(true)
-  const restSeconds = day.rest_seconds ?? 90
+  const restSeconds = block?.rest_seconds ?? day.rest_seconds ?? 90
   const restTimer = useRestTimer()
 
   // save-workout state
@@ -584,7 +658,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
 
   // Mid-workout add/remove UI state
   const [pickerKind,    setPickerKind]    = useState(null)  // null | 'exercise' | 'activity'
-  const [pickerSaveToProgram, setPickerSaveToProgram] = useState(false)
+  // Popup shown right after a pick — asks whether to also persist this item
+  // to the day's program permanently.  null when not asking.
+  const [addToProgramPrompt, setAddToProgramPrompt] = useState(null)  // { picked } | null
   const [knownNames,    setKnownNames]    = useState([])
   const [removeTarget,  setRemoveTarget]  = useState(null)  // { name, alsoProgram }
   const [editDayOpen,   setEditDayOpen]   = useState(false)
@@ -606,22 +682,36 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   // If the local cache already populated state with the right workoutId, skip
   // the Supabase fetch entirely — same-tab navigation is fully local.
   // Otherwise check for an in-progress workout on this day:
-  //   - started ≤12h ago: resume silently (banner shown, autosave continues).
-  //   - started >12h  ago: show prompt asking the user to Resume or Discard.
+  //   - started ≤12h ago and user hasn't typed yet: resume silently.
+  //   - started >12h ago, OR user already started typing during the fetch:
+  //     show prompt so we never clobber unsaved input.
   useEffect(() => {
     if (!userId) return
     if (cached?.workoutId) return  // local cache is the source of truth this session
     let cancelled = false
     ;(async () => {
       try {
-        const draft = await getInProgressWorkout(day.id, userId)
+        const draft = await getInProgressWorkout(day.id, blockId, userId)
         if (cancelled) return
         if (!draft) {
           setDraftLoaded(true)
           return
         }
+        // If the user has typed anything during the round-trip, never silently
+        // overwrite — prompt instead. stateRef holds the latest values from the
+        // most recent render.
+        const live = stateRef.current
+        const userTyped =
+          Object.values(live.sets || {}).some(arr => arr.some(r =>
+            r.weight !== '' || r.reps !== '' || r.is_warmup || r.checked ||
+            (r.rir !== '' && r.rir != null) || (r.rpe !== '' && r.rpe != null)
+          )) ||
+          Object.values(live.activityLogs || {}).some(l =>
+            l.checked || l.notes || l.duration_min || l.distance_display ||
+            l.intensity || l.avg_hr || l.calories || l.rounds || l.elevation_display
+          )
         const ageMs = Date.now() - new Date(draft.started_at).getTime()
-        if (ageMs > 12 * 3600 * 1000) {
+        if (userTyped || ageMs > 12 * 3600 * 1000) {
           setResumePrompt({
             draftId:    draft.id,
             draftState: draft.draft_state,
@@ -637,7 +727,7 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       }
     })()
     return () => { cancelled = true }
-  }, [day.id, userId]) // eslint-disable-line
+  }, [day.id, blockId, userId]) // eslint-disable-line
 
   function applyDraft(draft) {
     const ds = draft.draft_state || {}
@@ -690,7 +780,7 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       const bests = exerciseBests[exName] || { bestE1RM: 0, bestWeight: 0, maxRepsAtWeight: {} }
       let winner = null  // { setIdx, kind, priority, score, previous, currentWeightKg }
       exSets.forEach((set, idx) => {
-        if (set.is_warmup) return
+        if (set.is_warmup || set.is_drop_set) return
         const wKg = parseInputWeight(set.weight, unit)
         const r   = parseInt(set.reps)
         if (isNaN(wKg) || isNaN(r) || wKg <= 0 || r <= 0) return
@@ -754,10 +844,11 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         l.checked || l.notes || l.duration_min || l.distance_display ||
         l.intensity || l.avg_hr || l.calories || l.rounds || l.elevation_display
     )) return true
-    // Exercise list mutated relative to the program
-    if (el.length !== day.exercises.length) return true
+    // Exercise list mutated relative to this block's program slice.
+    const blockProgram = filterToBlock(day.exercises)
+    if (el.length !== blockProgram.length) return true
     for (let i = 0; i < el.length; i++) {
-      if (el[i]?.name !== day.exercises[i]?.name) return true
+      if (el[i]?.name !== blockProgram[i]?.name) return true
     }
     return false
   }
@@ -769,12 +860,13 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     if (!stateHasContent(s, a, el)) return
     flushPendingRef.current = true
     try {
-      const dayLabel = `${day.name}${day.focus ? ` — ${day.focus}` : ''}`
+      const dayLabel = `${day.name}${blockName && blockName !== 'Workout' ? ` — ${blockName}` : ''}`
       const result = await upsertDraft({
-        workoutId:     workoutIdRef.current,
-        trainingDayId: day.id,
+        workoutId:      workoutIdRef.current,
+        trainingDayId:  day.id,
+        workoutBlockId: blockId,
         dayLabel,
-        draftState:    { sets: s, activityLogs: a, exerciseList: el },
+        draftState:     { sets: s, activityLogs: a, exerciseList: el },
       }, userId)
       if (!workoutIdRef.current && result?.id) {
         workoutIdRef.current = result.id
@@ -846,6 +938,23 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   const removeSet = (exName, idx) =>
     setSets(prev => ({ ...prev, [exName]: prev[exName].filter((_, i) => i !== idx) }))
 
+  // Insert a drop set immediately after `parentIdx`, pre-filled with the parent's
+  // weight (you "drop" from there) and empty reps. Drops chain — adding a drop
+  // after a drop is allowed and useful for triple-drops.
+  const addDropSet = (exName, parentIdx) => {
+    setSets(prev => {
+      const arr = prev[exName] || []
+      const parent = arr[parentIdx]
+      const drop = {
+        ...makeEmptySet(),
+        is_drop_set: true,
+        weight: parent?.weight ?? '',
+      }
+      const next = [...arr.slice(0, parentIdx + 1), drop, ...arr.slice(parentIdx + 1)]
+      return { ...prev, [exName]: next }
+    })
+  }
+
   // Check-mode toggle — flip `checked` and start the rest timer if enabled.
   const toggleCheck = (exName, idx) => {
     setSets(prev => ({
@@ -858,6 +967,30 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   const getLastSets = (exName) => {
     if (!lastSession) return []
     return lastSession.sets.filter(s => s.exercise_name === exName)
+  }
+
+  // Pre-fill empty sets with values from the most recent session of this
+  // exercise. Already-typed sets are left untouched so a partial entry isn't
+  // wiped. RIR/RPE are session-specific feelings and intentionally not copied.
+  const copyLastSets = (exName) => {
+    const last = getLastSets(exName)
+    if (!last.length) return
+    setSets(prev => {
+      const current = prev[exName] || []
+      const next = current.map((s, i) => {
+        const src = last[i]
+        if (!src) return s
+        const isEmpty = s.weight === '' && s.reps === ''
+        if (!isEmpty) return s
+        return {
+          ...s,
+          weight:    kgToInputValue(src.weight_kg, unit),
+          reps:      src.reps ? String(src.reps) : '',
+          is_warmup: !!src.is_warmup,
+        }
+      })
+      return { ...prev, [exName]: next }
+    })
   }
 
   // ── Activity helpers ────────────────────────────────────
@@ -888,7 +1021,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   }
 
   // Called when the user picks (or creates) an item in the catalog modal.
-  const handlePickItem = async (name) => {
+  // The item is always added to today's session immediately. Then we ask the
+  // user (via a popup) whether to also persist it to the day's program — that
+  // way the toggle never silently changes their long-term plan.
+  const handlePickItem = (name) => {
     const trimmed = (name || '').trim()
     if (!trimmed) return
     if (exerciseList.some(e => e.name.toLowerCase() === trimmed.toLowerCase())) {
@@ -898,21 +1034,28 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     const isActivity = pickerKind === 'activity'
     const picked = isActivity
       ? { name: trimmed, target: '', item_type: 'activity', activity_fields: null }
-      : { name: trimmed, target: '', item_type: 'exercise', track_mode: 'sets', set_count: null }
+      : { name: trimmed, target: '', item_type: 'exercise', track_mode: 'sets', set_count: null, workout_block_id: blockId }
     setExerciseList(prev => [...prev, picked])
     if (isActivity) {
       setActivityLogs(prev => ({ ...prev, [trimmed]: makeEmptyActivity() }))
     } else {
       setSets(prev => ({ ...prev, [trimmed]: [makeEmptySet(), makeEmptySet()] }))
     }
-    if (pickerSaveToProgram) {
-      try {
-        await addExerciseToProgram(day.id, picked, userId)
-      } catch (e) {
-        setErrMsg(`Couldn't add to program: ${e.message}`)
-      }
-    }
     flushDraft()
+    // Ask once, scoped to this add. If the user says no it's gone.
+    setAddToProgramPrompt({ picked })
+  }
+
+  const confirmAddToProgram = async () => {
+    const picked = addToProgramPrompt?.picked
+    setAddToProgramPrompt(null)
+    if (!picked) return
+    try {
+      await addExerciseToProgram(day.id, picked, userId)
+      onProgramUpdated && onProgramUpdated()
+    } catch (e) {
+      setErrMsg(`Couldn't add to program: ${e.message}`)
+    }
   }
 
   const confirmRemoveExercise = async () => {
@@ -946,90 +1089,95 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       l.avg_hr || l.calories || l.rounds || l.elevation_display || l.notes
     )
 
-  const handleComplete = async () => {
-    if (!hasData && !isRestDay) { setErrMsg('Log at least one set or check an activity first.'); return }
+  // Build a save-shaped payload of the exercise sets (canonicalized to kg).
+  const buildSetsForSave = () => Object.fromEntries(
+    Object.entries(sets).map(([name, arr]) => [
+      name,
+      arr.map(s => ({
+        weight_kg:   parseInputWeight(s.weight, unit),
+        reps:        s.reps,
+        is_warmup:   !!s.is_warmup,
+        is_drop_set: !!s.is_drop_set,
+        rir:         s.rir,
+        rpe:         s.rpe,
+        checked:     !!s.checked,
+      })),
+    ])
+  )
+  const buildTrackModeMap = () => Object.fromEntries(
+    exerciseList
+      .filter(e => e.item_type !== 'activity')
+      .map(e => [e.name, e.track_mode === 'check' ? 'check' : 'sets'])
+  )
+  // Canonicalize a single activity log to the DB shape (km / m).
+  const canonicalizeActivityLog = (log) => {
+    const distKm = log.distance_display === '' || log.distance_display == null
+      ? null
+      : parseInputDistance(log.distance_display, unit)
+    const elevM = log.elevation_display === '' || log.elevation_display == null
+      ? null
+      : parseInputElevation(log.elevation_display, unit)
+    return {
+      checked:      log.checked,
+      notes:        log.notes,
+      duration_min: log.duration_min,
+      distance_km:  isNaN(distKm) ? null : distKm,
+      intensity:    log.intensity,
+      avg_hr:       log.avg_hr,
+      calories:     log.calories,
+      rounds:       log.rounds,
+      elevation_m:  isNaN(elevM) ? null : elevM,
+    }
+  }
+
+  // Complete the gym block (kind='workout') only — does not touch activities.
+  const handleCompleteWorkout = async () => {
+    const hasExerciseData = Object.values(sets).some(s => s.some(r => r.weight !== '' || r.reps !== '' || r.checked))
+    if (!hasExerciseData) {
+      setErrMsg('Log at least one set first.')
+      return
+    }
     setStatus('saving')
     setErrMsg('')
     try {
-      // Convert user-unit weights to kg before persisting.
-      // Preserves empty strings → NaN → saved as 0 in supabase.js.
-      const setsForSave = Object.fromEntries(
-        Object.entries(sets).map(([name, arr]) => [
-          name,
-          arr.map(s => ({
-            weight_kg: parseInputWeight(s.weight, unit),
-            reps:      s.reps,
-            is_warmup: !!s.is_warmup,
-            rir:       s.rir,
-            rpe:       s.rpe,
-            checked:   !!s.checked,
-          })),
-        ])
-      )
-      // Track-mode lookup for completeWorkout to branch sets vs check rows.
-      const trackModeMap = Object.fromEntries(
-        exerciseList
-          .filter(e => e.item_type !== 'activity')
-          .map(e => [e.name, e.track_mode === 'check' ? 'check' : 'sets'])
-      )
-      // Canonicalize activity distances/elevations into km/m before saving.
-      const activityLogsForSave = Object.fromEntries(
-        Object.entries(activityLogs).map(([name, log]) => {
-          const distKm = log.distance_display === '' || log.distance_display == null
-            ? null
-            : parseInputDistance(log.distance_display, unit)
-          const elevM  = log.elevation_display === '' || log.elevation_display == null
-            ? null
-            : parseInputElevation(log.elevation_display, unit)
-          return [name, {
-            checked:      log.checked,
-            notes:        log.notes,
-            duration_min: log.duration_min,
-            distance_km:  isNaN(distKm) ? null : distKm,
-            intensity:    log.intensity,
-            avg_hr:       log.avg_hr,
-            calories:     log.calories,
-            rounds:       log.rounds,
-            elevation_m:  isNaN(elevM) ? null : elevM,
-          }]
-        })
-      )
-      // Ensure a draft row exists before flipping it to completed.
-      const dayLabel = `${day.name}${day.focus ? ` — ${day.focus}` : ''}`
-      let id = workoutIdRef.current
-      if (!id) {
-        const draft = await upsertDraft({
-          trainingDayId: day.id,
-          dayLabel,
-          draftState:    { sets, activityLogs, exerciseList },
-        }, userId)
-        id = draft.id
-        setWorkoutId(id)
-        workoutIdRef.current = id
-      }
-      const workout = await completeWorkout(
-        id, dayLabel, setsForSave, activityLogsForSave, userId, trackModeMap
-      )
-      // The draft is now a finalized workout — drop the local cache.
-      clearLsDraft(lsKey)
+      const setsForSave = buildSetsForSave()
+      const trackModeMap = buildTrackModeMap()
+      const dayLabel = `${day.name}${blockName && blockName !== 'Workout' ? ` — ${blockName}` : ''}`
+
+      const workout = await insertCompletedSession({
+        trainingDayId:  day.id,
+        dayLabel,
+        kind:           'workout',
+        workoutBlockId: blockId,
+        exerciseSets:   setsForSave,
+        trackModeMap,
+      }, userId)
+
       const currentVolKg = calcSessionVolume(sets, unit)
       let msg = ''
       try {
         const prev = await getPreviousSessionVolume(day.id, workout.id)
         msg = buildVolumeMsg(currentVolKg, prev) || ''
-      } catch {
-        // non-fatal — skip the message if the fetch fails
-      }
+      } catch { /* non-fatal */ }
       setVolumeMsg(msg)
+      setWorkoutDoneAt(workout.completed_at || new Date().toISOString())
       setStatus('saved')
+
+      // Workout is done — tear down the draft so we don't resume into an
+      // already-saved session.
+      clearLsDraft(lsKey)
+      if (workoutIdRef.current) {
+        try { await discardDraft(workoutIdRef.current, userId) } catch {}
+      }
     } catch (e) {
       setErrMsg(e.message || 'Failed to save — please try again.')
       setStatus('idle')
     }
   }
 
+
   const handleArchiveTrigger = () => {
-    setArchiveName(day.name + (day.focus ? ` — ${day.focus}` : ''))
+    setArchiveName(blockName && blockName !== 'Workout' ? blockName : day.name)
     setArchiveStep('naming')
   }
 
@@ -1070,7 +1218,12 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           <div className="workout-header__info">
             <div className="workout-header__name">
               {day.name}
-              {day.focus && <><span style={{ color: 'var(--text-muted)' }}> — </span><span style={{ color: titleColor }}>{day.focus}</span></>}
+              {blockName && blockName !== 'Workout' && (
+                <>
+                  <span style={{ color: 'var(--text-muted)' }}> — </span>
+                  <span style={{ color: titleColor }}>{blockName}</span>
+                </>
+              )}
             </div>
           </div>
           {lastDate && <div className="workout-header__last">Last: {lastDate}</div>}
@@ -1153,82 +1306,94 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           </div>
         )}
 
-        {/* Render items in their original order, mixing types */}
-        {exerciseList.map(item => {
-          if (item.item_type === 'activity') {
+        {/* Render items, grouping by superset_group when present.
+            Activity / check-mode items never participate in supersets. */}
+        {(() => {
+          const renderItem = (item) => {
+            if (item.track_mode === 'check') {
+              const n = Math.max(1, item.set_count ?? 1)
+              const exSets = sets[item.name] || Array.from({ length: n }, () => makeEmptySet())
+              return (
+                <CheckCard
+                  key={item.name}
+                  exercise={item}
+                  sets={exSets}
+                  onToggleCheck={idx => toggleCheck(item.name, idx)}
+                  onHistory={() => onHistory(item.name)}
+                  onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
+                />
+              )
+            }
             return (
-              <ActivityCard
-                key={item.name}
-                item={item}
-                log={activityLogs[item.name] || makeEmptyActivity()}
-                unit={unit}
-                lastLog={getLastActivityLog(item.name)}
-                onToggle={() => toggleActivity(item.name)}
-                onUpdate={(field, val) => updateActivityField(item.name, field, val)}
-                onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
-              />
-            )
-          }
-          if (item.track_mode === 'check') {
-            const n = Math.max(1, item.set_count ?? 1)
-            const exSets = sets[item.name] || Array.from({ length: n }, () => makeEmptySet())
-            return (
-              <CheckCard
+              <ExerciseCard
                 key={item.name}
                 exercise={item}
-                sets={exSets}
-                onToggleCheck={idx => toggleCheck(item.name, idx)}
+                sets={sets[item.name] || [makeEmptySet(), makeEmptySet()]}
+                lastSets={getLastSets(item.name)}
+                prInfo={prFlags[item.name]}
+                unit={unit}
+                intensityMode={intensityMode}
+                onUpdate={(idx, field, val) => updateSet(item.name, idx, field, val)}
+                onConfirm={idx => confirmSet(item.name, idx)}
+                onAdd={() => addSet(item.name)}
+                onRemove={idx => removeSet(item.name, idx)}
                 onHistory={() => onHistory(item.name)}
+                onToggleWarmup={idx => toggleWarmup(item.name, idx)}
                 onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
+                onCopyLast={() => copyLastSets(item.name)}
+                onAddDrop={(idx) => addDropSet(item.name, idx)}
               />
             )
           }
-          return (
-            <ExerciseCard
-              key={item.name}
-              exercise={item}
-              sets={sets[item.name] || [makeEmptySet(), makeEmptySet()]}
-              lastSets={getLastSets(item.name)}
-              prInfo={prFlags[item.name]}
-              unit={unit}
-              intensityMode={intensityMode}
-              onUpdate={(idx, field, val) => updateSet(item.name, idx, field, val)}
-              onConfirm={idx => confirmSet(item.name, idx)}
-              onAdd={() => addSet(item.name)}
-              onRemove={idx => removeSet(item.name, idx)}
-              onHistory={() => onHistory(item.name)}
-              onToggleWarmup={idx => toggleWarmup(item.name, idx)}
-              onRemoveExercise={() => setRemoveTarget({ name: item.name, alsoProgram: false })}
-            />
-          )
-        })}
+          // Bundle same-group exercises into one wrapper card.
+          // Group is positioned at the first occurrence in exerciseList.
+          const seen = new Set()
+          const out = []
+          for (const item of exerciseList) {
+            const g = item.item_type === 'exercise' ? item.superset_group : null
+            if (g && !seen.has(g)) {
+              seen.add(g)
+              const members = exerciseList.filter(e => e.item_type === 'exercise' && e.superset_group === g)
+              out.push(
+                <div key={`superset-${g}`} className="superset-card">
+                  <div className="superset-header">Superset {g} · alternate</div>
+                  <div className="superset-body">
+                    {members.map(m => renderItem(m))}
+                  </div>
+                </div>
+              )
+            } else if (!g) {
+              out.push(renderItem(item))
+            }
+          }
+          return out
+        })()}
 
         <div className="workout-add-row">
           <button className="ex-browse-btn" onClick={() => openAddPicker('exercise')}>+ Add exercise</button>
-          <button className="ex-browse-btn ex-browse-btn--alt" onClick={() => openAddPicker('activity')}>+ Add activity</button>
         </div>
-        <label className="workout-add-save-row">
-          <input
-            type="checkbox"
-            checked={pickerSaveToProgram}
-            onChange={e => setPickerSaveToProgram(e.target.checked)}
-          />
-          <span>Also save to program</span>
-        </label>
 
         {errMsg && <p className="err-msg">{errMsg}</p>}
 
-        <button
-          className={`complete-btn ${status === 'saved' ? 'complete-btn--saved' : ''}`}
-          onClick={handleComplete}
-          disabled={status === 'saving' || status === 'saved'}
-        >
-          {status === 'saved'   ? '✓ Done!'
-           : status === 'saving' ? 'Saving…'
-           : isRestDay ? 'Ticked Off' : 'Complete Workout'}
-        </button>
+        {/* Bottom button only completes the gym block. Activities each have
+            their own Mark-done button. Hidden once the workout is done. */}
+        {exerciseItems.length > 0 && !workoutDoneAt && (
+          <button
+            className={`complete-btn ${status === 'saved' ? 'complete-btn--saved' : ''}`}
+            onClick={handleCompleteWorkout}
+            disabled={status === 'saving'}
+          >
+            {status === 'saving' ? 'Saving…' : 'Complete Workout'}
+          </button>
+        )}
 
-        {status === 'saved' && volumeMsg && (
+        {workoutDoneAt && (
+          <div className="workout-done-banner">
+            ✓ Workout completed {new Date(workoutDoneAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+          </div>
+        )}
+
+        {volumeMsg && (
           <div className="volume-msg">{volumeMsg}</div>
         )}
 
@@ -1341,11 +1506,37 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         value={restSeconds}
         onClose={() => setRestPickerOpen(false)}
         onPick={(seconds) => {
-          updateDayMeta(day.id, { rest_seconds: seconds }, userId)
+          // Write to the block when we have one; fall back to the day for
+          // legacy/orphan paths so the picker still does something useful.
+          const writer = blockId
+            ? updateWorkoutBlock(blockId, { rest_seconds: seconds }, userId)
+            : updateDayMeta(day.id, { rest_seconds: seconds }, userId)
+          writer
             .then(() => onProgramUpdated && onProgramUpdated())
             .catch(e => setErrMsg(e.message))
         }}
       />
+
+      {/* ── Add-to-program prompt ────────────────────────── */}
+      {addToProgramPrompt && (
+        <div className="modal-backdrop" onClick={() => setAddToProgramPrompt(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <h3 className="modal-title">Add to {day.name}'s plan?</h3>
+            <p className="modal-body">
+              <strong>{addToProgramPrompt.picked.name}</strong> is in today's session.
+              Do you also want to add it to {day.name}'s program permanently, so it shows up every {day.name}?
+            </p>
+            <div className="modal-actions">
+              <button className="modal-btn-primary" onClick={confirmAddToProgram}>
+                Yes, add to {day.name}
+              </button>
+              <button className="modal-btn-cancel" onClick={() => setAddToProgramPrompt(null)}>
+                Today only
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Remove exercise confirm ──────────────────────── */}
       {removeTarget && (

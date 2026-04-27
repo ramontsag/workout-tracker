@@ -217,6 +217,40 @@ export const EXERCISE_CATALOG = [
     ],
   },
   {
+    group: 'Bodyweight / Calisthenics',
+    subgroups: [
+      { name: 'Push (skills & advanced)', items: [
+        'Diamond push-up', 'Archer push-up', 'Pseudo planche push-up',
+        'One-arm push-up (assisted)', 'One-arm push-up',
+        'Pike push-up', 'Wall handstand push-up', 'Free handstand push-up',
+        'Hindu push-up', 'Tiger bend push-up',
+      ] },
+      { name: 'Pull (skills & advanced)', items: [
+        'Australian row (bodyweight)', 'Archer pull-up', 'Typewriter pull-up',
+        'Commando pull-up', 'L-sit pull-up',
+        'Muscle-up (bar)', 'Muscle-up (rings)',
+        'Front lever pull', 'Front lever raise',
+      ] },
+      { name: 'Legs (single-leg & advanced)', items: [
+        'Pistol squat', 'Shrimp squat', 'Cossack squat (bodyweight)',
+        'Single-leg glute bridge', 'Single-leg Romanian deadlift (bodyweight)',
+        'Jumping lunge',
+      ] },
+      { name: 'Static holds / levers', items: [
+        'Tuck front lever hold', 'Advanced tuck front lever hold',
+        'Straddle front lever hold', 'Full front lever hold',
+        'Back lever hold',
+        'Tuck planche hold', 'Straddle planche hold', 'Full planche hold',
+        'V-sit hold', 'Manna hold',
+        'Crow pose', 'Handstand hold',
+        'Dragon flag', 'Human flag',
+      ] },
+      { name: 'Plyometric / explosive', items: [
+        'Clap push-up', 'Plyo push-up', 'Jump squat',
+      ] },
+    ],
+  },
+  {
     group: 'Olympic / Power',
     subgroups: [
       { name: 'Snatch family', items: [

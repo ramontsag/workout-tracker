@@ -12,6 +12,7 @@ export default function ExerciseHistory({ exercise, profile, onBack }) {
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [range, setRange] = useState('6m')  // '4w' | '3m' | '6m' | 'all'
 
   useEffect(() => {
     getExerciseHistory(exercise)
@@ -25,6 +26,15 @@ export default function ExerciseHistory({ exercise, profile, onBack }) {
     sets
       .filter(s => !s.is_warmup)
       .reduce((acc, s) => acc + (s.weight_kg || 0) * (s.reps || 0), 0)
+
+  // Client-side range filter — 'all' shows everything; the rest cap at the
+  // matching number of days back from now.
+  const filteredSessions = (() => {
+    if (range === 'all') return sessions
+    const days   = range === '6m' ? 180 : range === '3m' ? 90 : 28
+    const cutoff = Date.now() - days * 86400000
+    return sessions.filter(s => s.date && new Date(s.date).getTime() >= cutoff)
+  })()
 
   return (
     <div className="screen">
@@ -46,7 +56,35 @@ export default function ExerciseHistory({ exercise, profile, onBack }) {
           </div>
         )}
 
-        {sessions.map((session, i) => {
+        {!loading && !error && sessions.length > 0 && (
+          <div className="lifts-controls" style={{ margin: '4px 0 12px' }}>
+            <div className="lifts-range">
+              {[
+                { k: '4w',  l: '4w'  },
+                { k: '3m',  l: '3m'  },
+                { k: '6m',  l: '6m'  },
+                { k: 'all', l: 'All' },
+              ].map(({ k, l }) => (
+                <button
+                  key={k}
+                  className={`lifts-range__btn${range === k ? ' lifts-range__btn--on' : ''}`}
+                  onClick={() => setRange(k)}
+                >{l}</button>
+              ))}
+            </div>
+            <span className="exhist-count">
+              {filteredSessions.length} of {sessions.length}
+            </span>
+          </div>
+        )}
+
+        {!loading && !error && sessions.length > 0 && filteredSessions.length === 0 && (
+          <div className="state-msg state-msg--empty">
+            No sessions in this range.
+          </div>
+        )}
+
+        {filteredSessions.map((session, i) => {
           const date = session.date
             ? new Date(session.date).toLocaleDateString('en-US', {
                 weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',

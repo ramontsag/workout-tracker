@@ -3,13 +3,34 @@ import {
   logBodyWeight, getBodyWeightLogs,
   getExerciseNames, getVolumeHistory,
   getActivityNames, getActivityHistory, bucketActivityByWeek,
+  getBodyMeasurements,
+  getStrengthHistory,
 } from '../supabase'
+import MainLiftsSetup from './MainLiftsSetup'
 import {
   displayWeight, parseInputWeight, unitLabel, kgToLbs,
+  displayLength, lengthUnitLabel,
   displayDistance, distanceUnitLabel,
   displayElevation, elevationUnitLabel,
 } from '../utils/units'
 import { formatActivityLine } from '../utils/sessionFormat'
+
+// Body-tab metric definitions. The 'value' getter pulls the right field
+// from a row in the right unit. Length fields convert cm → user unit.
+const MEASURE_FIELDS = [
+  { key: 'neck_cm',          label: 'Neck'        },
+  { key: 'chest_cm',         label: 'Chest'       },
+  { key: 'waist_cm',         label: 'Waist'       },
+  { key: 'glute_cm',         label: 'Glutes'      },
+  { key: 'arm_left_cm',      label: 'Arm L'       },
+  { key: 'arm_right_cm',     label: 'Arm R'       },
+  { key: 'forearm_left_cm',  label: 'Forearm L'   },
+  { key: 'forearm_right_cm', label: 'Forearm R'   },
+  { key: 'thigh_left_cm',    label: 'Thigh L'     },
+  { key: 'thigh_right_cm',   label: 'Thigh R'     },
+  { key: 'calf_left_cm',     label: 'Calf L'      },
+  { key: 'calf_right_cm',    label: 'Calf R'      },
+]
 
 function getToday() {
   const d = new Date()
@@ -20,15 +41,17 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-// ── Weight line graph ─────────────────────────────────────────
-// Weights stored in kg; convert for display based on user's unit preference.
-function WeightGraph({ logs, unit }) {
-  if (!logs || logs.length < 2) return null
+// ── Generic trend line ────────────────────────────────────────
+// data: [{ date: ISO, value: number }] — newest first OR oldest first.
+// Caller is responsible for unit conversion before passing values in.
+function TrendLine({ data, fillColor = 'rgba(249,115,22,0.08)', strokeColor = 'var(--accent)' }) {
+  if (!data || data.length < 2) return null
 
-  const data    = [...logs].reverse()
-  const weights = data.map(l => unit === 'lbs' ? kgToLbs(Number(l.weight_kg)) : Number(l.weight_kg))
-  const rawMin  = Math.min(...weights)
-  const rawMax  = Math.max(...weights)
+  // Render oldest → newest left-to-right.
+  const sorted = [...data].sort((a, b) => new Date(a.date) - new Date(b.date))
+  const values = sorted.map(d => Number(d.value))
+  const rawMin  = Math.min(...values)
+  const rawMax  = Math.max(...values)
   const pad     = (rawMax - rawMin) * 0.2 || 0.5
   const yMin    = rawMin - pad
   const yMax    = rawMax + pad
@@ -39,14 +62,14 @@ function WeightGraph({ logs, unit }) {
   const plotW = W - PL - PR
   const plotH = H - PT - PB
 
-  const toX = i => PL + (i / (data.length - 1)) * plotW
+  const toX = i => PL + (i / (sorted.length - 1)) * plotW
   const toY = v => PT + (1 - (v - yMin) / range) * plotH
 
-  const pts      = data.map((l, i) => ({ x: toX(i), y: toY(weights[i]), iso: l.logged_at }))
+  const pts      = sorted.map((d, i) => ({ x: toX(i), y: toY(values[i]), iso: d.date }))
   const polyline = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
   const guides   = [rawMax, (rawMin + rawMax) / 2, rawMin]
-  const midIdx   = Math.floor((data.length - 1) / 2)
-  const xIdxs    = [...new Set([0, midIdx, data.length - 1])]
+  const midIdx   = Math.floor((sorted.length - 1) / 2)
+  const xIdxs    = [...new Set([0, midIdx, sorted.length - 1])]
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" className="weight-graph">
@@ -63,20 +86,20 @@ function WeightGraph({ logs, unit }) {
       ))}
       <polygon
         points={`${PL},${(PT + plotH).toFixed(1)} ${polyline} ${(W - PR).toFixed(1)},${(PT + plotH).toFixed(1)}`}
-        fill="rgba(249,115,22,0.08)"
+        fill={fillColor}
       />
       <polyline points={polyline} fill="none"
-        stroke="var(--accent)" strokeWidth="2"
+        stroke={strokeColor} strokeWidth="2"
         strokeLinecap="round" strokeLinejoin="round" />
       {pts.map((p, i) => (
         <circle key={i} cx={p.x.toFixed(1)} cy={p.y.toFixed(1)}
-          r="3" fill="var(--accent)" stroke="var(--bg)" strokeWidth="1.5" />
+          r="3" fill={strokeColor} stroke="var(--bg)" strokeWidth="1.5" />
       ))}
       {xIdxs.map(i => (
         <text key={i} x={toX(i).toFixed(1)} y={H - 5}
-          textAnchor={i === 0 ? 'start' : i === data.length - 1 ? 'end' : 'middle'}
+          textAnchor={i === 0 ? 'start' : i === sorted.length - 1 ? 'end' : 'middle'}
           className="graph-label">
-          {fmtDate(data[i].iso)}
+          {fmtDate(sorted[i].iso)}
         </text>
       ))}
     </svg>
@@ -105,12 +128,24 @@ function Sparkline({ values, color = 'var(--accent)' }) {
 
 // ── Main component ────────────────────────────────────────────
 export default function ProgressScreen({ user, profile, onBack }) {
-  const unit  = profile?.weight_unit || 'kg'
-  const label = unitLabel(unit)
-  const [activeTab, setActiveTab] = useState('weight')
+  const unit    = profile?.weight_unit || 'kg'
+  const label   = unitLabel(unit)
+  const lenLabel = lengthUnitLabel(unit)
+  const [activeTab, setActiveTab] = useState('strength')
 
-  // ── Weight state ────────────────────────────────────────
+  // ── Strength state ──────────────────────────────────────
+  // Local mainLifts copy seeded from profile. We mutate this on save so the
+  // tab updates instantly without waiting for App to re-fetch profile.
+  const [mainLifts,         setMainLifts]      = useState(profile?.main_lifts || [])
+  const [strengthSeries,    setStrengthSeries] = useState([])
+  const [strengthLoading,   setStrengthLoading] = useState(false)
+  const [setupOpen,         setSetupOpen]      = useState(false)
+
+  // ── Body state ────────────────────────────────────────
+  // selectedMetric: 'weight' or one of MEASURE_FIELDS keys (e.g. 'waist_cm')
+  const [selectedMetric, setSelectedMetric] = useState('weight')
   const [weightLogs,     setWeightLogs]     = useState([])
+  const [measurements,   setMeasurements]   = useState([])
   const [showWeightForm, setShowWeightForm] = useState(false)
   const [weightInput,    setWeightInput]    = useState('')
   const [dateInput,      setDateInput]      = useState(getToday)
@@ -123,6 +158,9 @@ export default function ProgressScreen({ user, profile, onBack }) {
   const [volumeHistory,     setVolumeHistory]     = useState([])
   const [volumeLoading,     setVolumeLoading]     = useState(false)
   const [volumeError,       setVolumeError]       = useState('')
+  const [liftsMetric,       setLiftsMetric]       = useState('volume')  // 'volume' | 'e1rm'
+  const [liftsRange,        setLiftsRange]        = useState('6m')      // '4w' | '3m' | '6m' | 'all'
+  const [showFormulaInfo,   setShowFormulaInfo]   = useState(false)
 
   // ── Activities state ────────────────────────────────────
   const [activityNames,    setActivityNames]    = useState([])
@@ -133,7 +171,8 @@ export default function ProgressScreen({ user, profile, onBack }) {
 
   useEffect(() => {
     if (!user?.id) return
-    getBodyWeightLogs(user.id, 12).then(setWeightLogs).catch(() => {})
+    getBodyWeightLogs(user.id, 52).then(setWeightLogs).catch(() => {})
+    getBodyMeasurements(user.id, 52).then(setMeasurements).catch(() => {})
     getExerciseNames(user.id)
       .then(names => {
         setExerciseNames(names)
@@ -147,6 +186,17 @@ export default function ProgressScreen({ user, profile, onBack }) {
       })
       .catch(() => {})
   }, [user?.id])
+
+  // Refetch the strength time series whenever the slots change.
+  useEffect(() => {
+    if (!user?.id) return
+    const names = (mainLifts || []).map(s => s.exercise).filter(Boolean)
+    if (!names.length) { setStrengthSeries([]); return }
+    setStrengthLoading(true)
+    getStrengthHistory(user.id, names)
+      .then(s => { setStrengthSeries(s); setStrengthLoading(false) })
+      .catch(() => { setStrengthLoading(false) })
+  }, [user?.id, mainLifts])
 
   useEffect(() => {
     if (!selectedExercise || !user?.id) return
@@ -178,7 +228,7 @@ export default function ProgressScreen({ user, profile, onBack }) {
         null,
         user.id
       )
-      setWeightLogs(prev => [saved, ...prev].slice(0, 12))
+      setWeightLogs(prev => [saved, ...prev].slice(0, 52))
       setWeightInput('')
       setDateInput(getToday())
       setShowWeightForm(false)
@@ -192,6 +242,80 @@ export default function ProgressScreen({ user, profile, onBack }) {
   // Volume sparkline values — raw kg·reps numbers. The chart is relative so
   // unit conversion here would only change the y-axis scale, not shape.
   const volumeSparkValues = [...volumeHistory].reverse().map(s => s.totalVolume)
+
+  // ── Lifts tab derived ────────────────────────────────────
+  // Date-range filter (client-side) + metric switch (volume vs e1RM). The
+  // chart and the history list both read from this filtered+mapped slice.
+  const filteredVolumeHistory = (() => {
+    if (liftsRange === 'all') return volumeHistory
+    const days   = liftsRange === '6m' ? 180 : liftsRange === '3m' ? 90 : 28
+    const cutoff = Date.now() - days * 86400000
+    return volumeHistory.filter(s => new Date(s.date).getTime() >= cutoff)
+  })()
+  const liftsSparkValues = [...filteredVolumeHistory].reverse().map(s =>
+    liftsMetric === 'volume'
+      ? (unit === 'lbs' ? kgToLbs(s.totalVolume) : s.totalVolume)
+      : (unit === 'lbs' ? kgToLbs(s.maxE1RMkg || 0) : (s.maxE1RMkg || 0))
+  )
+
+  // ── Strength tab derived ─────────────────────────────────
+  // Latest snapshot (best e1RM so far per exercise) — drives both the
+  // headline score and the per-slot mini-cards.
+  const latestSnap   = strengthSeries.length ? strengthSeries[strengthSeries.length - 1] : null
+  const latestPerEx  = latestSnap?.perExercise || {}
+  const totalE1RMkg  = latestSnap?.totalE1RM || 0
+  const totalE1RMDsp = unit === 'lbs' ? kgToLbs(totalE1RMkg) : totalE1RMkg
+  const latestBwKg   = weightLogs[0]?.weight_kg ? Number(weightLogs[0].weight_kg) : 0
+  const bwRatio      = latestBwKg > 0 ? totalE1RMkg / latestBwKg : null
+
+  // 4-week-ago snapshot for the per-slot delta arrows.
+  const fourWeeksAgo = Date.now() - 28 * 86400000
+  const snap4wAgo    = (() => {
+    let last = null
+    for (const s of strengthSeries) {
+      if (new Date(s.date).getTime() <= fourWeeksAgo) last = s
+      else break
+    }
+    return last
+  })()
+
+  // Trend dataset for the chart, in user's display unit so the y-axis labels
+  // line up with the headline score.
+  const strengthTrend = strengthSeries.map(s => ({
+    date:  s.date,
+    value: unit === 'lbs' ? kgToLbs(s.totalE1RM) : s.totalE1RM,
+  }))
+
+  // ── Body tab derived ─────────────────────────────────────
+  // Measurement fields shown in the dropdown — any field the user has logged
+  // at least once, so the option appears after the very first measurement
+  // session. The chart itself still requires ≥2 entries before it renders;
+  // the empty state nudges the user to log one more.
+  const availableMeasureFields = MEASURE_FIELDS.filter(f =>
+    measurements.some(m => m[f.key] != null)
+  )
+  // Build the chart dataset for whichever metric is selected, already in
+  // the user's display unit so the y-axis labels match the values shown.
+  let bodyDataset = []           // [{ date, value }]
+  let bodyUnitLabel = label
+  if (selectedMetric === 'weight') {
+    bodyDataset = weightLogs.map(l => ({
+      date:  l.logged_at,
+      value: unit === 'lbs' ? kgToLbs(Number(l.weight_kg)) : Number(l.weight_kg),
+    }))
+    bodyUnitLabel = label
+  } else {
+    bodyDataset = measurements
+      .filter(m => m[selectedMetric] != null)
+      .map(m => ({
+        date:  m.measured_at,
+        value: parseFloat(displayLength(m[selectedMetric], unit)),
+      }))
+    bodyUnitLabel = lenLabel
+  }
+  const bodyHistoryRows = [...bodyDataset]
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 12)
 
   // ── Activity derived stats ─────────────────────────────
   // Primary metric: distance_km if any session has it, else duration_min, else session count.
@@ -250,16 +374,22 @@ export default function ProgressScreen({ user, profile, onBack }) {
       {/* ── Tabs ──────────────────────────────────────────── */}
       <div className="setup-tabs">
         <button
-          className={`setup-tab ${activeTab === 'weight' ? 'setup-tab--active' : ''}`}
-          onClick={() => setActiveTab('weight')}
+          className={`setup-tab ${activeTab === 'strength' ? 'setup-tab--active' : ''}`}
+          onClick={() => setActiveTab('strength')}
         >
-          Weight
+          Strength
         </button>
         <button
           className={`setup-tab ${activeTab === 'workout' ? 'setup-tab--active' : ''}`}
           onClick={() => setActiveTab('workout')}
         >
-          Workout
+          Lifts
+        </button>
+        <button
+          className={`setup-tab ${activeTab === 'body' ? 'setup-tab--active' : ''}`}
+          onClick={() => setActiveTab('body')}
+        >
+          Body
         </button>
         <button
           className={`setup-tab ${activeTab === 'activities' ? 'setup-tab--active' : ''}`}
@@ -271,74 +401,185 @@ export default function ProgressScreen({ user, profile, onBack }) {
 
       <div className="content">
 
-        {/* ── Weight tab ────────────────────────────────── */}
-        {activeTab === 'weight' && (
+        {/* ── Strength tab ──────────────────────────────── */}
+        {activeTab === 'strength' && (
           <>
-            {weightLogs.length >= 2 ? (
+            {(!mainLifts || mainLifts.length === 0) ? (
+              <div className="strength-empty">
+                <div className="strength-empty__icon">🏋️</div>
+                <div className="strength-empty__title">Pick the lifts you care about</div>
+                <div className="strength-empty__sub">
+                  Add 1–6 main lifts (Squat, Bench, Deadlift…) and we'll track your total e1RM over time.
+                </div>
+                <button className="strength-setup-btn" onClick={() => setSetupOpen(true)}>
+                  Set up main lifts
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="strength-headline">
+                  <div className="strength-headline__top">
+                    <span className="strength-headline__label">Strength score</span>
+                    <button className="strength-edit-chip" onClick={() => setSetupOpen(true)}>Edit lifts</button>
+                  </div>
+                  <div className="strength-headline__row">
+                    <span className="strength-headline__total">
+                      {Math.round(totalE1RMDsp).toLocaleString()} <span className="strength-headline__unit">{label}</span>
+                    </span>
+                    {bwRatio != null && bwRatio > 0 && (
+                      <span className="strength-headline__ratio">· {bwRatio.toFixed(2)}× BW</span>
+                    )}
+                  </div>
+                  <div className="strength-headline__hint">
+                    sum of estimated 1-rep max across {mainLifts.length} lift{mainLifts.length === 1 ? '' : 's'}
+                  </div>
+                </div>
+
+                {strengthTrend.length >= 2 && (
+                  <div className="progress-graph-wrap">
+                    <TrendLine data={strengthTrend} />
+                  </div>
+                )}
+
+                {strengthLoading && strengthTrend.length < 2 && (
+                  <div className="state-msg state-msg--empty">Loading…</div>
+                )}
+                {!strengthLoading && strengthTrend.length === 0 && (
+                  <div className="state-msg state-msg--empty">
+                    Log a working set on any of these lifts to start the trend
+                  </div>
+                )}
+
+                <div className="strength-slots">
+                  {mainLifts.map(lift => {
+                    const eKg     = latestPerEx[lift.exercise] || 0
+                    const eDsp    = unit === 'lbs' ? kgToLbs(eKg) : eKg
+                    const e4wKg   = snap4wAgo?.perExercise?.[lift.exercise] || 0
+                    const deltaPct = e4wKg > 0
+                      ? ((eKg - e4wKg) / e4wKg) * 100
+                      : (eKg > 0 ? 100 : 0)
+                    const arrow = deltaPct > 0.5 ? '▲' : deltaPct < -0.5 ? '▼' : '•'
+                    const deltaCls = deltaPct > 0.5 ? 'up' : deltaPct < -0.5 ? 'down' : 'flat'
+                    return (
+                      <button
+                        key={lift.slot + ':' + lift.exercise}
+                        className="strength-slot"
+                        onClick={() => {
+                          setSelectedExercise(lift.exercise)
+                          setActiveTab('workout')
+                        }}
+                      >
+                        <div className="strength-slot__name">{lift.slot}</div>
+                        <div className="strength-slot__exname">{lift.exercise}</div>
+                        <div className="strength-slot__val">
+                          {eKg > 0
+                            ? <>{Math.round(eDsp).toLocaleString()} <span className="strength-slot__unit">{label}</span></>
+                            : <span className="strength-slot__nodata">— no data —</span>}
+                        </div>
+                        {eKg > 0 && (
+                          <div className={`strength-slot__delta strength-slot__delta--${deltaCls}`}>
+                            {arrow} {Math.abs(deltaPct).toFixed(1)}%
+                            <span className="strength-slot__delta-label"> · 4w</span>
+                          </div>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* ── Body tab ──────────────────────────────────── */}
+        {activeTab === 'body' && (
+          <>
+            <select
+              className="field-input volume-select"
+              value={selectedMetric}
+              onChange={e => setSelectedMetric(e.target.value)}
+            >
+              <option value="weight">Body weight</option>
+              {availableMeasureFields.map(f => (
+                <option key={f.key} value={f.key}>{f.label}</option>
+              ))}
+            </select>
+
+            {bodyDataset.length >= 2 ? (
               <div className="progress-graph-wrap">
-                <WeightGraph logs={weightLogs} unit={unit} />
+                <TrendLine data={bodyDataset} />
               </div>
             ) : (
               <div className="state-msg state-msg--empty">
-                {weightLogs.length === 0
-                  ? 'No entries yet — log your first weight below'
+                {bodyDataset.length === 0
+                  ? (selectedMetric === 'weight'
+                      ? 'No entries yet — log your first weight below'
+                      : 'No entries for this metric yet')
                   : 'Log one more entry to see your trend'}
               </div>
             )}
 
-            <button
-              className={`weight-toggle-btn ${showWeightForm ? 'weight-toggle-btn--cancel' : ''}`}
-              onClick={() => { setShowWeightForm(f => !f); setWeightError('') }}
-            >
-              {showWeightForm ? 'Cancel' : '+ Log Weight'}
-            </button>
-
-            {showWeightForm && (
-              <div className="weight-form" style={{ marginTop: 10 }}>
-                <div className="weight-form-row">
-                  <div className="weight-form-field">
-                    <label className="field-label">Weight ({label})</label>
-                    <input
-                      className="field-input"
-                      type="number"
-                      inputMode="decimal"
-                      step="0.1"
-                      placeholder={unit === 'lbs' ? 'e.g. 182' : 'e.g. 82.5'}
-                      value={weightInput}
-                      onChange={e => { setWeightInput(e.target.value); setWeightError('') }}
-                      onKeyDown={e => e.key === 'Enter' && handleLogWeight()}
-                      autoFocus
-                    />
-                  </div>
-                  <div className="weight-form-field">
-                    <label className="field-label">Date</label>
-                    <input
-                      className="field-input"
-                      type="date"
-                      value={dateInput}
-                      onChange={e => setDateInput(e.target.value)}
-                    />
-                  </div>
-                </div>
-                {weightError && (
-                  <div className="err-msg" style={{ textAlign: 'left', marginTop: 0 }}>{weightError}</div>
-                )}
+            {/* Bodyweight log form is only on this metric — measurements are
+                logged from the Profile screen. */}
+            {selectedMetric === 'weight' && (
+              <>
                 <button
-                  className="weight-log-btn"
-                  onClick={handleLogWeight}
-                  disabled={weightSaving}
+                  className={`weight-toggle-btn ${showWeightForm ? 'weight-toggle-btn--cancel' : ''}`}
+                  onClick={() => { setShowWeightForm(f => !f); setWeightError('') }}
                 >
-                  {weightSaving ? 'Saving…' : 'Save'}
+                  {showWeightForm ? 'Cancel' : '+ Log Weight'}
                 </button>
-              </div>
+
+                {showWeightForm && (
+                  <div className="weight-form" style={{ marginTop: 10 }}>
+                    <div className="weight-form-row">
+                      <div className="weight-form-field">
+                        <label className="field-label">Weight ({label})</label>
+                        <input
+                          className="field-input"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.1"
+                          placeholder={unit === 'lbs' ? 'e.g. 182' : 'e.g. 82.5'}
+                          value={weightInput}
+                          onChange={e => { setWeightInput(e.target.value); setWeightError('') }}
+                          onKeyDown={e => e.key === 'Enter' && handleLogWeight()}
+                          autoFocus
+                        />
+                      </div>
+                      <div className="weight-form-field">
+                        <label className="field-label">Date</label>
+                        <input
+                          className="field-input"
+                          type="date"
+                          value={dateInput}
+                          onChange={e => setDateInput(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    {weightError && (
+                      <div className="err-msg" style={{ textAlign: 'left', marginTop: 0 }}>{weightError}</div>
+                    )}
+                    <button
+                      className="weight-log-btn"
+                      onClick={handleLogWeight}
+                      disabled={weightSaving}
+                    >
+                      {weightSaving ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
 
-            {weightLogs.length > 0 && (
+            {bodyHistoryRows.length > 0 && (
               <div className="weight-history-list" style={{ marginTop: 16 }}>
-                {weightLogs.slice(0, 12).map(entry => (
-                  <div key={entry.id} className="weight-history-item">
-                    <span className="weight-history-date">{fmtDate(entry.logged_at)}</span>
-                    <span className="weight-history-val">{displayWeight(Number(entry.weight_kg), unit)} {label}</span>
+                {bodyHistoryRows.map((row, i) => (
+                  <div key={`${row.date}-${i}`} className="weight-history-item">
+                    <span className="weight-history-date">{fmtDate(row.date)}</span>
+                    <span className="weight-history-val">
+                      {Number.isInteger(row.value) ? row.value : row.value.toFixed(1)} {bodyUnitLabel}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -346,7 +587,7 @@ export default function ProgressScreen({ user, profile, onBack }) {
           </>
         )}
 
-        {/* ── Workout tab ───────────────────────────────── */}
+        {/* ── Lifts tab ─────────────────────────────────── */}
         {activeTab === 'workout' && (
           <>
             {exerciseNames.length === 0 ? (
@@ -363,6 +604,40 @@ export default function ProgressScreen({ user, profile, onBack }) {
                   ))}
                 </select>
 
+                {/* Metric + range controls */}
+                <div className="lifts-controls">
+                  <div className="lifts-toggle" role="tablist">
+                    <button
+                      className={`lifts-toggle__btn${liftsMetric === 'volume' ? ' lifts-toggle__btn--on' : ''}`}
+                      onClick={() => setLiftsMetric('volume')}
+                    >Volume</button>
+                    <button
+                      className={`lifts-toggle__btn${liftsMetric === 'e1rm' ? ' lifts-toggle__btn--on' : ''}`}
+                      onClick={() => setLiftsMetric('e1rm')}
+                    >e1RM</button>
+                  </div>
+                  <div className="lifts-range">
+                    {[
+                      { k: '4w',  l: '4w'  },
+                      { k: '3m',  l: '3m'  },
+                      { k: '6m',  l: '6m'  },
+                      { k: 'all', l: 'All' },
+                    ].map(({ k, l }) => (
+                      <button
+                        key={k}
+                        className={`lifts-range__btn${liftsRange === k ? ' lifts-range__btn--on' : ''}`}
+                        onClick={() => setLiftsRange(k)}
+                      >{l}</button>
+                    ))}
+                  </div>
+                  <button
+                    className="lifts-info-btn"
+                    onClick={() => setShowFormulaInfo(true)}
+                    aria-label="How are PRs and e1RM calculated?"
+                    title="How are PRs and e1RM calculated?"
+                  >ⓘ</button>
+                </div>
+
                 {volumeLoading && (
                   <div className="state-msg state-msg--empty">Loading…</div>
                 )}
@@ -372,27 +647,38 @@ export default function ProgressScreen({ user, profile, onBack }) {
 
                 {!volumeLoading && !volumeError && (
                   <>
-                    {volumeSparkValues.length >= 2 && (
+                    {liftsSparkValues.length >= 2 && (
                       <div className="sparkline-wrap">
-                        <Sparkline values={volumeSparkValues} color="#3b82f6" />
+                        <Sparkline
+                          values={liftsSparkValues}
+                          color={liftsMetric === 'volume' ? '#3b82f6' : '#FFB800'}
+                        />
                       </div>
                     )}
-                    {volumeHistory.length > 0 ? (
+                    {filteredVolumeHistory.length > 0 ? (
                       <div className="weight-history-list">
-                        {volumeHistory.map(s => {
-                          const vol = unit === 'lbs' ? kgToLbs(s.totalVolume) : s.totalVolume
+                        {filteredVolumeHistory.map(s => {
+                          const valKg = liftsMetric === 'volume' ? s.totalVolume : (s.maxE1RMkg || 0)
+                          const val   = unit === 'lbs' ? kgToLbs(valKg) : valKg
+                          const suffix = liftsMetric === 'volume' ? `${label}·reps` : label
                           return (
                             <div key={s.workoutId} className="weight-history-item">
                               <span className="weight-history-date">{fmtDate(s.date)}</span>
                               <span className="weight-history-val">
-                                {Math.round(vol).toLocaleString()} {label}·reps
+                                {valKg > 0
+                                  ? <>{Math.round(val).toLocaleString()} {suffix}</>
+                                  : '—'}
                               </span>
                             </div>
                           )
                         })}
                       </div>
                     ) : (
-                      <div className="state-msg state-msg--empty">No sessions logged yet</div>
+                      <div className="state-msg state-msg--empty">
+                        {volumeHistory.length === 0
+                          ? 'No sessions logged yet'
+                          : 'No sessions in this range'}
+                      </div>
                     )}
                   </>
                 )}
@@ -494,6 +780,37 @@ export default function ProgressScreen({ user, profile, onBack }) {
 
         <div style={{ height: 40 }} />
       </div>
+
+      <MainLiftsSetup
+        open={setupOpen}
+        initialSlots={mainLifts}
+        userId={user?.id}
+        onClose={() => setSetupOpen(false)}
+        onSaved={(slots) => setMainLifts(slots)}
+      />
+
+      {showFormulaInfo && (
+        <div className="modal-backdrop" onClick={() => setShowFormulaInfo(false)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <h3 className="modal-title">How PRs and e1RM work</h3>
+            <p className="modal-body">
+              <strong>PRs</strong> are detected three ways, in priority order:
+              <br />· <strong>Weight PR</strong> — heaviest weight ever for that lift.
+              <br />· <strong>Reps PR</strong> — most reps you've done at that exact weight.
+              <br />· <strong>e1RM PR</strong> — highest estimated 1-rep max.
+              <br /><br />
+              <strong>e1RM</strong> uses the Epley formula: <em>weight × (1 + reps / 30)</em>.
+              The same formula is used for every exercise.
+              <br /><br />
+              Warmup sets and drop sets are excluded from PRs and e1RM. Drop sets still
+              count toward total volume since they're real work.
+            </p>
+            <div className="modal-actions">
+              <button className="modal-btn-primary" onClick={() => setShowFormulaInfo(false)}>Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
