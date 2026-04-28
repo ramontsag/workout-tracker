@@ -468,9 +468,8 @@ function ActivityCard({ item, log, unit, lastLog, onToggle, onUpdate, onRemoveEx
               <div className="activity-field-input-wrap">
                 <input
                   className="activity-field-input"
-                  type="number"
+                  type="text"
                   inputMode="decimal"
-                  step="0.01"
                   value={log.distance_display ?? ''}
                   onChange={e => onUpdate('distance_display', e.target.value)}
                   onFocus={e => e.target.select()}

@@ -94,7 +94,7 @@ function DayActivityCard({ item, log, unit, onUpdate, onComplete, doneAt, saving
                   <div className="activity-field-input-wrap">
                     <input
                       className="activity-field-input"
-                      type="number" inputMode="decimal" step="0.01"
+                      type="text" inputMode="decimal"
                       value={log.distance_display ?? ''}
                       onChange={e => onUpdate('distance_display', e.target.value)}
                       onFocus={e => e.target.select()}

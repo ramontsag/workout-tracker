@@ -47,7 +47,8 @@ export function displayDistance(km, unit) {
 }
 
 export function parseInputDistance(raw, unit) {
-  const n = parseFloat(raw)
+  // Accept comma as the decimal separator too (European keyboards).
+  const n = parseFloat(typeof raw === 'string' ? raw.replace(',', '.') : raw)
   if (isNaN(n)) return NaN
   return unit === 'lbs' ? milesToKm(n) : n
 }
