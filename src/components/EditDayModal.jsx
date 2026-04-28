@@ -353,7 +353,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                         onClick={() => toggleDropSets(i)}
                         title={it.has_drop_sets ? 'Drop sets enabled — tap to disable' : 'Enable drop sets for this exercise'}
                       >
-                        {it.has_drop_sets ? '↓ Drop' : 'Drop'}
+                        {it.has_drop_sets ? '↓ Dropset' : 'Dropset'}
                       </button>
                     )}
                     {!isActivity && (
