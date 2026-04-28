@@ -1019,8 +1019,22 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .reorder-btn:disabled { opacity: 0.2; }
 .reorder-btn:not(:disabled):active { color: var(--accent); }
 .ex-edit-name   { flex: 1; font-size: 14px; color: var(--text-dim); }
-.ex-edit-remove { font-size: 18px; color: var(--text-muted); padding: 2px 6px; }
-.ex-edit-remove:active { color: var(--danger); }
+.ex-edit-remove {
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.10);
+  border: 1px solid rgba(239, 68, 68, 0.40);
+  border-radius: 99px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ex-edit-remove:active { background: rgba(239, 68, 68, 0.25); }
 
 .ex-target-input {
   display: block;

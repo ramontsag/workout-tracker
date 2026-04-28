@@ -338,9 +338,6 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                       <button className="reorder-btn" onClick={() => moveItem(i, -1)} disabled={n === 0}>↑</button>
                       <button className="reorder-btn" onClick={() => moveItem(i,  1)} disabled={n === total - 1}>↓</button>
                     </div>
-                    <span className={`item-type-pill ${isActivity ? 'item-type-pill--act' : 'item-type-pill--ex'}`}>
-                      {isActivity ? 'Activity' : 'Exercise'}
-                    </span>
                     {!isActivity && (
                       <button
                         className={`item-track-pill ${isCheck ? 'item-track-pill--check' : 'item-track-pill--track'}`}
