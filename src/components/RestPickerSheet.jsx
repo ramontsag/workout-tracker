@@ -8,6 +8,9 @@ import React from 'react'
 //   - value: number (current rest in seconds)
 //   - onPick: (seconds: number) => void
 //   - onClose: () => void
+//   - timerEnabled?: boolean       Optional — when provided, renders an
+//                                  "Auto-start when I tick a set" toggle.
+//   - onToggleTimer?: () => void   Required if timerEnabled is provided.
 const PRESETS = [30, 45, 60, 75, 90, 120, 150, 180, 240, 300]
 
 function format(s) {
@@ -19,8 +22,9 @@ function format(s) {
   return `${s} seconds`
 }
 
-export default function RestPickerSheet({ open, value, onPick, onClose }) {
+export default function RestPickerSheet({ open, value, onPick, onClose, timerEnabled, onToggleTimer }) {
   if (!open) return null
+  const showTimerToggle = typeof timerEnabled === 'boolean' && typeof onToggleTimer === 'function'
   return (
     <div className="picker-overlay" onClick={onClose}>
       <div className="picker-sheet rest-picker-sheet" onClick={e => e.stopPropagation()}>
@@ -40,6 +44,18 @@ export default function RestPickerSheet({ open, value, onPick, onClose }) {
             </button>
           ))}
         </div>
+        {showTimerToggle && (
+          <div className="rest-picker-footer">
+            <label className="rest-picker-toggle">
+              <input
+                type="checkbox"
+                checked={timerEnabled}
+                onChange={onToggleTimer}
+              />
+              <span>Auto-start when I tick a set</span>
+            </label>
+          </div>
+        )}
       </div>
     </div>
   )

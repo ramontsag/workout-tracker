@@ -4,6 +4,7 @@ import { saveSettings } from '../supabase'
 export default function SettingsScreen({ user, profile, onBack, onProfileUpdated }) {
   const [weightUnit,    setWeightUnit]    = useState(profile?.weight_unit    || 'kg')
   const [intensityMode, setIntensityMode] = useState(profile?.intensity_mode || 'off')
+  const [uiMode,        setUiMode]        = useState(profile?.ui_mode        || 'classic')
   const [error, setError] = useState('')
 
   const updateField = async (field, value, setter, prev) => {
@@ -28,6 +29,24 @@ export default function SettingsScreen({ user, profile, onBack, onProfileUpdated
       </header>
 
       <div className="content">
+
+        {/* UI mode — Classic vs Simplified */}
+        <div className="setting-block">
+          <div className="setting-label">Interface</div>
+          <div className="setting-sub">
+            <strong>Classic</strong> shows every control on the workout screen (warmup chip, remove-set, modal prompts). <strong>Simplified</strong> hides the chrome you don't need: cards collapse when finished, one rest pill, lighter prompts. You can switch back any time.
+          </div>
+          <div className="segmented-control">
+            <button
+              className={`segmented-option ${uiMode === 'classic' ? 'segmented-option--active' : ''}`}
+              onClick={() => updateField('ui_mode', 'classic', setUiMode, uiMode)}
+            >Classic</button>
+            <button
+              className={`segmented-option ${uiMode === 'simplified' ? 'segmented-option--active' : ''}`}
+              onClick={() => updateField('ui_mode', 'simplified', setUiMode, uiMode)}
+            >Simplified</button>
+          </div>
+        </div>
 
         {/* Units */}
         <div className="setting-block">

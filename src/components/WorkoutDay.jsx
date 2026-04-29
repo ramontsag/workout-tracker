@@ -4,7 +4,7 @@ import {
   getInProgressWorkout, upsertDraft, discardDraft,
   addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames,
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
-  insertCompletedSession,
+  insertCompletedSession, updateCompletedSession,
 } from '../supabase'
 import {
   displayWeight, parseInputWeight, unitLabel, kgToInputValue,
@@ -149,7 +149,7 @@ function progressIndicator(sets, lastSets, unit) {
 // Shown after Complete Workout saves successfully. Surfaces total volume,
 // total reps and sets, comparison vs last session, and any PRs hit. Tap
 // Done (or backdrop) to navigate home.
-function WorkoutSummary({ summary, unit, onClose }) {
+function WorkoutSummary({ summary, unit, onClose, onEdit }) {
   if (!summary) return null
   const label = unitLabel(unit)
   const { totalVolKg, totalReps, totalSets, prs, volumeMsg } = summary
@@ -203,6 +203,9 @@ function WorkoutSummary({ summary, unit, onClose }) {
           </div>
         )}
         <div className="modal-actions">
+          {onEdit && (
+            <button className="modal-btn-cancel" onClick={onEdit}>Edit</button>
+          )}
           <button className="modal-btn-primary" onClick={onClose}>Done</button>
         </div>
       </div>
@@ -248,17 +251,50 @@ function PRPopover({ info, unit, onDismiss }) {
 // ── Exercise item card (weight + reps per set) ────────────────
 function ExerciseCard({
   exercise, sets, lastSets, prInfo, unit, intensityMode,
+  density = 'detailed', collapsed = false, onToggleCollapsed,
   onUpdate, onConfirm, onAdd, onRemove, onHistory, onToggleWarmup,
   onRemoveExercise, onCopyLast, onAddDrop,
 }) {
   const prog = progressIndicator(sets, lastSets, unit)
   const label = unitLabel(unit)
+  const isSimple = density === 'simple'
   const lastSummary = lastSets.length > 0
     ? lastSets
         .filter(s => !s.is_warmup && !s.is_drop_set)
         .map(s => `${fmt(displayWeight(s.weight_kg, unit))}${label}×${fmt(s.reps)}`)
         .join(' · ')
     : null
+
+  // Collapsed view: shown when all working sets are done and the card has been
+  // auto-folded (Simplified mode only). Tap anywhere on the bar to re-expand.
+  if (collapsed) {
+    const doneSummary = sets
+      .filter(s => !s.is_warmup && s.done)
+      .map(s => {
+        const wKg = parseInputWeight(s.weight, unit)
+        const wDisp = isFinite(wKg) ? displayWeight(wKg, unit) : ''
+        const wStr = (wDisp === '' || wDisp === 0) ? '—' : `${wDisp}${label}`
+        const reps = s.reps ? `×${s.reps}` : ''
+        const prefix = s.is_drop_set ? '↓' : ''
+        return `${prefix}${wStr}${reps}`
+      })
+      .join(' · ') || 'No sets'
+    return (
+      <div className="ex-card ex-card--collapsed">
+        <button
+          type="button"
+          className="ex-collapsed-row"
+          onClick={onToggleCollapsed}
+          aria-label={`Expand ${exercise.name}`}
+        >
+          <span className="ex-collapsed-tick">✓</span>
+          <span className="ex-collapsed-name">{exercise.name}</span>
+          <span className="ex-collapsed-summary">{doneSummary}</span>
+          <span className="ex-collapsed-chev" aria-hidden>▸</span>
+        </button>
+      </div>
+    )
+  }
 
   // Working-set numbering: drops and warmups don't increment.
   // Index → 1-based number for working sets, null for warmups/drops.
@@ -282,6 +318,14 @@ function ExerciseCard({
         <button className="ex-history-btn" onClick={onHistory} title="View history">↗</button>
         {onRemoveExercise && (
           <button className="ex-remove-btn" onClick={onRemoveExercise} title="Remove from this workout" aria-label="Remove exercise">×</button>
+        )}
+        {onToggleCollapsed && (
+          <button
+            className="ex-collapse-btn"
+            onClick={onToggleCollapsed}
+            title="Collapse this exercise"
+            aria-label="Collapse"
+          >▾</button>
         )}
       </div>
 
@@ -352,7 +396,7 @@ function ExerciseCard({
                     />
                   )}
                 </div>
-                {!isDrop && (
+                {!isDrop && !isSimple && (
                   <button
                     className={`set-warmup-chip${set.is_warmup ? ' set-warmup-chip--on' : ''}`}
                     onClick={() => onToggleWarmup(idx)}
@@ -365,7 +409,9 @@ function ExerciseCard({
                   onClick={() => onConfirm(idx)}
                   title={set.done ? 'Done' : 'Mark set done'}
                 >✓</button>
-                {sets.length > 1 && (
+                {/* In Simple mode the × is only shown on the last set so users */}
+                {/* still have a discoverable way to drop an extra set. */}
+                {sets.length > 1 && (!isSimple || idx === sets.length - 1) && (
                   <button className="set-remove" onClick={() => onRemove(idx)}>×</button>
                 )}
               </div>
@@ -596,7 +642,25 @@ function ActivityCard({ item, log, unit, lastLog, onToggle, onUpdate, onRemoveEx
 // Same shape as ExerciseCard but with checkboxes per set instead of
 // weight/reps inputs. Used for finishers, bodyweight accessories, or
 // anything the user just wants to check off without tracking load.
-function CheckCard({ exercise, sets, onToggleCheck, onHistory, onRemoveExercise }) {
+function CheckCard({ exercise, sets, onToggleCheck, onHistory, onRemoveExercise, collapsed = false, onToggleCollapsed }) {
+  if (collapsed) {
+    const doneCount = sets.filter(s => s.checked).length
+    return (
+      <div className="ex-card ex-card--collapsed">
+        <button
+          type="button"
+          className="ex-collapsed-row"
+          onClick={onToggleCollapsed}
+          aria-label={`Expand ${exercise.name}`}
+        >
+          <span className="ex-collapsed-tick">✓</span>
+          <span className="ex-collapsed-name">{exercise.name}</span>
+          <span className="ex-collapsed-summary">{doneCount} / {sets.length} checked</span>
+          <span className="ex-collapsed-chev" aria-hidden>▸</span>
+        </button>
+      </div>
+    )
+  }
   return (
     <div className="ex-card">
       <div className="ex-header">
@@ -609,6 +673,14 @@ function CheckCard({ exercise, sets, onToggleCheck, onHistory, onRemoveExercise 
         <button className="ex-history-btn" onClick={onHistory} title="View history">↗</button>
         {onRemoveExercise && (
           <button className="ex-remove-btn" onClick={onRemoveExercise} title="Remove from this workout" aria-label="Remove exercise">×</button>
+        )}
+        {onToggleCollapsed && (
+          <button
+            className="ex-collapse-btn"
+            onClick={onToggleCollapsed}
+            title="Collapse this exercise"
+            aria-label="Collapse"
+          >▾</button>
         )}
       </div>
 
@@ -635,9 +707,13 @@ function CheckCard({ exercise, sets, onToggleCheck, onHistory, onRemoveExercise 
 // ── Main component ────────────────────────────────────────────
 // `block` is the workout_blocks row we're scoping to. If null/undefined
 // (legacy callers), we fall back to "all exercises in the day".
-export default function WorkoutDay({ day, program, userId, profile, onBack, onHistory, onProgramUpdated, onCompleteHome, block }) {
+export default function WorkoutDay({ day, program, userId, profile, onBack, onHistory, onProgramUpdated, onCompleteHome, block, editingCompletedId = null }) {
   const unit          = profile?.weight_unit    || 'kg'
   const intensityMode = profile?.intensity_mode || 'off'
+  const uiMode        = profile?.ui_mode        || 'classic'
+  const isSimple      = uiMode === 'simplified'
+  const density       = isSimple ? 'simple' : 'detailed'
+  const editingMode   = !!editingCompletedId
   const blockId       = block?.id || null
   const blockName     = block?.name || day?.focus || 'Workout'
 
@@ -702,9 +778,14 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   // Local completion state for the workout-block (only). Activities now live
   // on DayScreen and complete independently from there.
   const [workoutDoneAt, setWorkoutDoneAt] = useState(null)
+  // True when the user has tapped "Edit" on the completed banner — they're
+  // editing a workout that was already saved. Save calls updateCompletedSession
+  // instead of insertCompletedSession.
+  const [editingCompleted, setEditingCompleted] = useState(false)
   // Post-workout summary modal payload. null = hidden.
   const [summary, setSummary] = useState(null)
-  const [timerEnabled, setTimerEnabled] = useState(true)
+  // Hydrates from the block's persisted setting (DB default true).
+  const [timerEnabled, setTimerEnabled] = useState(() => block?.timer_enabled ?? true)
   const restSeconds = block?.rest_seconds ?? day.rest_seconds ?? 90
   const restTimer = useRestTimer()
 
@@ -721,6 +802,31 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   const [draftLoaded, setDraftLoaded] = useState(!!cached)
   const [resumeBanner, setResumeBanner] = useState(null)  // { startedAt } | null  (silent resume notice)
   const [resumePrompt, setResumePrompt] = useState(null)  // { draftId, draftState, startedAt } | null  (>12h)
+
+  // Per-exercise collapsed state (Simplified mode auto-collapses completed
+  // cards; classic mode never collapses). Stored as a Set of exercise names.
+  const [collapsedExercises, setCollapsedExercises] = useState(() => new Set())
+  const toggleCollapsed = (name) => setCollapsedExercises(prev => {
+    const next = new Set(prev)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    return next
+  })
+  // When the user un-ticks a set or adds a new set, expand the card so the
+  // new state is visible. This is called from confirmSet / addSet / removeSet.
+  const expandExercise = (name) => setCollapsedExercises(prev => {
+    if (!prev.has(name)) return prev
+    const next = new Set(prev); next.delete(name); return next
+  })
+  // Decide whether an exercise is "fully done" — used for auto-collapse.
+  // Track-mode: every set has done=true. Check-mode: every set has checked=true.
+  const isExerciseFullyDone = (name, exSets) => {
+    if (!exSets || exSets.length === 0) return false
+    const item = exerciseList.find(e => e.name === name)
+    const isCheck = item?.track_mode === 'check'
+    if (isCheck) return exSets.every(s => s.checked)
+    return exSets.every(s => s.done)
+  }
 
   // Mid-workout add/remove UI state
   const [pickerKind,    setPickerKind]    = useState(null)  // null | 'exercise' | 'activity'
@@ -1051,15 +1157,38 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   }
 
   const confirmSet = (exName, idx) => {
-    setSets(prev => ({
-      ...prev,
-      [exName]: prev[exName].map((s, i) => i === idx ? { ...s, done: true } : s),
-    }))
-    if (timerEnabled) restTimer.start(restSeconds, day.id, blockId)
+    setSets(prev => {
+      const current = prev[exName] || []
+      const wasDone = !!current[idx]?.done
+      const updated = current.map((s, i) => i === idx ? { ...s, done: !s.done } : s)
+      // After the toggle: if every set is done, auto-collapse (Simplified only).
+      // If we just un-ticked the set, make sure the card is expanded.
+      if (wasDone) {
+        // toggling off — expand
+        expandExercise(exName)
+      } else if (isSimple) {
+        const item = exerciseList.find(e => e.name === exName)
+        const isCheck = item?.track_mode === 'check'
+        const allDone = isCheck
+          ? updated.every(s => s.checked)
+          : updated.every(s => s.done)
+        if (allDone) {
+          setCollapsedExercises(p => {
+            const next = new Set(p); next.add(exName); return next
+          })
+        }
+      }
+      return { ...prev, [exName]: updated }
+    })
+    // Only start the rest timer when ticking ON, not when un-ticking.
+    const wasDone = !!sets[exName]?.[idx]?.done
+    if (!wasDone && timerEnabled) restTimer.start(restSeconds, day.id, blockId)
   }
 
-  const addSet = (exName) =>
+  const addSet = (exName) => {
+    expandExercise(exName)
     setSets(prev => ({ ...prev, [exName]: [...prev[exName], makeEmptySet()] }))
+  }
 
   const toggleWarmup = (exName, idx) =>
     setSets(prev => ({
@@ -1067,8 +1196,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       [exName]: prev[exName].map((s, i) => i === idx ? { ...s, is_warmup: !s.is_warmup } : s),
     }))
 
-  const removeSet = (exName, idx) =>
+  const removeSet = (exName, idx) => {
+    expandExercise(exName)
     setSets(prev => ({ ...prev, [exName]: prev[exName].filter((_, i) => i !== idx) }))
+  }
 
   // Insert a drop set immediately after `parentIdx`, pre-filled with the parent's
   // weight (you "drop" from there) and empty reps. Drops chain — adding a drop
@@ -1089,11 +1220,21 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
 
   // Check-mode toggle — flip `checked` and start the rest timer if enabled.
   const toggleCheck = (exName, idx) => {
-    setSets(prev => ({
-      ...prev,
-      [exName]: prev[exName].map((s, i) => i === idx ? { ...s, checked: !s.checked } : s),
-    }))
-    if (timerEnabled) restTimer.start(restSeconds, day.id, blockId)
+    setSets(prev => {
+      const current = prev[exName] || []
+      const wasChecked = !!current[idx]?.checked
+      const updated = current.map((s, i) => i === idx ? { ...s, checked: !s.checked } : s)
+      if (wasChecked) {
+        expandExercise(exName)
+      } else if (isSimple && updated.every(s => s.checked)) {
+        setCollapsedExercises(p => {
+          const next = new Set(p); next.add(exName); return next
+        })
+      }
+      return { ...prev, [exName]: updated }
+    })
+    const wasChecked = !!sets[exName]?.[idx]?.checked
+    if (!wasChecked && timerEnabled) restTimer.start(restSeconds, day.id, blockId)
   }
 
   const getLastSets = (exName) => {
@@ -1334,6 +1475,30 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   }
 
 
+  // Save edits to a previously-completed workout. Wipes the existing
+  // workout_sets rows for this workout id and inserts the new ones.
+  const handleSaveEdit = async () => {
+    const targetId = workoutIdRef.current || workoutId
+    if (!targetId) {
+      setErrMsg('No workout to update.')
+      return
+    }
+    setStatus('saving')
+    setErrMsg('')
+    try {
+      const setsForSave = buildSetsForSave()
+      const trackModeMap = buildTrackModeMap()
+      await updateCompletedSession(targetId, setsForSave, {}, userId, trackModeMap)
+      setEditingCompleted(false)
+      // Re-surface the completed banner so the user has a clear "saved" cue.
+      setWorkoutDoneAt(new Date().toISOString())
+      setStatus('saved')
+    } catch (e) {
+      setErrMsg(e.message || 'Save failed — please try again.')
+      setStatus('idle')
+    }
+  }
+
   const handleArchiveTrigger = () => {
     setArchiveName(blockName && blockName !== 'Workout' ? blockName : day.name)
     setArchiveStep('naming')
@@ -1402,38 +1567,53 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                   <button className="workout-menu-item" onClick={() => { setMenuOpen(false); handleArchiveTrigger() }}>
                     Save as template…
                   </button>
-                  <button
-                    className="workout-menu-item"
-                    onClick={() => {
-                      const next = !timerEnabled
-                      setTimerEnabled(next)
-                      if (!next) restTimer.stop()
-                      setMenuOpen(false)
-                    }}
-                  >
-                    {timerEnabled ? 'Disable rest timer' : 'Enable rest timer'}
-                  </button>
+                  {!isSimple && (
+                    <button
+                      className="workout-menu-item"
+                      onClick={() => {
+                        const next = !timerEnabled
+                        setTimerEnabled(next)
+                        if (!next) restTimer.stop()
+                        setMenuOpen(false)
+                        if (blockId) {
+                          updateWorkoutBlock(blockId, { timer_enabled: next }, userId)
+                            .then(() => onProgramUpdated && onProgramUpdated())
+                            .catch(() => {})
+                        }
+                      }}
+                    >
+                      {timerEnabled ? 'Disable rest timer' : 'Enable rest timer'}
+                    </button>
+                  )}
                 </div>
               </>
             )}
           </div>
         </header>
 
-        {/* Rest preset picker — tap to open a sheet of values */}
+        {/* Rest preset picker — tap to open a sheet of values.
+            Simplified mode merges the on/off badge into the picker sheet,
+            so the row shows just the pill (with subtle "off" styling when
+            auto-start is disabled). */}
         <div className="workout-controls-row">
           <button
             type="button"
-            className="rest-picker-trigger"
+            className={`rest-picker-trigger${isSimple && !timerEnabled ? ' rest-picker-trigger--off' : ''}`}
             onClick={() => setRestPickerOpen(true)}
             title="Change rest duration"
           >
             <span className="rest-picker-trigger-label">Rest</span>
             <span className="rest-picker-trigger-val">{formatRestShort(restSeconds)}</span>
+            {isSimple && !timerEnabled && (
+              <span className="rest-picker-trigger-off-tag" aria-label="Auto-start disabled">off</span>
+            )}
             <span className="rest-picker-trigger-chev">▾</span>
           </button>
-          <span className={`rest-timer-flag${timerEnabled ? '' : ' rest-timer-flag--off'}`}>
-            {timerEnabled ? 'Timer on' : 'Timer off'}
-          </span>
+          {!isSimple && (
+            <span className={`rest-timer-flag${timerEnabled ? '' : ' rest-timer-flag--off'}`}>
+              {timerEnabled ? 'Timer on' : 'Timer off'}
+            </span>
+          )}
         </div>
 
         {restTimer.active && (
@@ -1468,6 +1648,8 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
             Activity / check-mode items never participate in supersets. */}
         {(() => {
           const renderItem = (item) => {
+            const collapsed = isSimple && collapsedExercises.has(item.name)
+            const onToggleCollapsed = isSimple ? () => toggleCollapsed(item.name) : undefined
             if (item.track_mode === 'check') {
               const n = Math.max(1, item.set_count ?? 1)
               const exSets = sets[item.name] || Array.from({ length: n }, () => makeEmptySet())
@@ -1478,6 +1660,8 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                   sets={exSets}
                   onToggleCheck={idx => toggleCheck(item.name, idx)}
                   onHistory={() => onHistory(item.name)}
+                  collapsed={collapsed}
+                  onToggleCollapsed={onToggleCollapsed}
                 />
               )
             }
@@ -1490,6 +1674,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                 prInfo={prFlags[item.name]}
                 unit={unit}
                 intensityMode={intensityMode}
+                density={density}
+                collapsed={collapsed}
+                onToggleCollapsed={onToggleCollapsed}
                 onUpdate={(idx, field, val) => updateSet(item.name, idx, field, val)}
                 onConfirm={idx => confirmSet(item.name, idx)}
                 onAdd={() => addSet(item.name)}
@@ -1528,20 +1715,41 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         {errMsg && <p className="err-msg">{errMsg}</p>}
 
         {/* Bottom button only completes the gym block. Activities each have
-            their own Mark-done button. Hidden once the workout is done. */}
+            their own Mark-done button. Hidden once the workout is done.
+            In edit-completed mode, label changes and the handler routes to
+            updateCompletedSession instead of insertCompletedSession. */}
         {exerciseItems.length > 0 && !workoutDoneAt && (
           <button
             className={`complete-btn ${status === 'saved' ? 'complete-btn--saved' : ''}`}
-            onClick={handleCompleteWorkout}
+            onClick={editingCompleted ? handleSaveEdit : handleCompleteWorkout}
             disabled={status === 'saving'}
           >
-            {status === 'saving' ? 'Saving…' : 'Complete Workout'}
+            {status === 'saving'
+              ? 'Saving…'
+              : editingCompleted
+                ? 'Save changes'
+                : 'Complete Workout'}
           </button>
         )}
 
+        {/* Tap "Edit" on the banner to fix a logging mistake — the cards
+            re-open with the saved values still there, and Save updates the
+            existing workout in place. */}
         {workoutDoneAt && (
           <div className="workout-done-banner">
-            ✓ Workout completed {new Date(workoutDoneAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            <span className="workout-done-banner__text">
+              ✓ Workout completed {new Date(workoutDoneAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </span>
+            <button
+              type="button"
+              className="workout-done-banner__edit"
+              onClick={() => {
+                setEditingCompleted(true)
+                setWorkoutDoneAt(null)
+                setStatus('idle')
+                setErrMsg('')
+              }}
+            >Edit</button>
           </div>
         )}
 
@@ -1585,8 +1793,38 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         <div style={{ height: 40 }} />
       </div>
 
-      {/* ── Resume prompt: draft started >12h ago ──────────── */}
-      {resumePrompt && (
+      {/* ── Resume prompt: draft started >12h ago ────────────
+          Simplified mode shows a top toast instead of a blocking modal so
+          you can keep scrolling — Resume / Discard live inline. */}
+      {resumePrompt && isSimple && (
+        <div className="resume-toast" role="status">
+          <div className="resume-toast__text">
+            Unfinished workout from {new Date(resumePrompt.startedAt).toLocaleString('en-US', {
+              weekday: 'short', hour: 'numeric', minute: '2-digit',
+            })}
+          </div>
+          <div className="resume-toast__actions">
+            <button
+              className="resume-toast__resume"
+              onClick={() => {
+                applyDraft({ id: resumePrompt.draftId, draft_state: resumePrompt.draftState })
+                setResumeBanner({ startedAt: resumePrompt.startedAt })
+                setResumePrompt(null)
+              }}
+            >Resume</button>
+            <button
+              className="resume-toast__discard"
+              onClick={async () => {
+                clearLsDraft(lsKey)
+                try { await discardDraft(resumePrompt.draftId, userId) } catch {}
+                setResumePrompt(null)
+                setDraftLoaded(true)
+              }}
+            >Discard</button>
+          </div>
+        </div>
+      )}
+      {resumePrompt && !isSimple && (
         <div className="modal-backdrop">
           <div className="modal-card">
             <h3 className="modal-title">Unfinished workout</h3>
@@ -1652,7 +1890,8 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         />
       )}
 
-      {/* Rest preset sheet */}
+      {/* Rest preset sheet — Simplified mode also surfaces the auto-start
+          toggle here so the workout screen stays single-pill clean. */}
       <RestPickerSheet
         open={restPickerOpen}
         value={restSeconds}
@@ -1667,6 +1906,19 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
             .then(() => onProgramUpdated && onProgramUpdated())
             .catch(e => setErrMsg(e.message))
         }}
+        timerEnabled={isSimple ? timerEnabled : undefined}
+        onToggleTimer={isSimple ? () => {
+          const next = !timerEnabled
+          setTimerEnabled(next)
+          if (!next) restTimer.stop()
+          // Persist to the block so the choice survives reloads. Silent on
+          // error — the local toggle still works for this session.
+          if (blockId) {
+            updateWorkoutBlock(blockId, { timer_enabled: next }, userId)
+              .then(() => onProgramUpdated && onProgramUpdated())
+              .catch(() => {})
+          }
+        } : undefined}
       />
 
       {/* ── Add-to-program prompt ────────────────────────── */}
@@ -1712,7 +1964,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         </div>
       )}
 
-      {/* ── Post-workout summary ─────────────────────────── */}
+      {/* ── Post-workout summary ───────────────────────────
+          Edit dismisses the summary and re-enters edit-completed mode so
+          the user can fix a mistake before leaving. */}
       <WorkoutSummary
         summary={summary}
         unit={unit}
@@ -1720,6 +1974,13 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           setSummary(null)
           if (onCompleteHome) onCompleteHome()
           else if (onBack) onBack()
+        }}
+        onEdit={() => {
+          setSummary(null)
+          setEditingCompleted(true)
+          setWorkoutDoneAt(null)
+          setStatus('idle')
+          setErrMsg('')
         }}
       />
     </div>

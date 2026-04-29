@@ -206,11 +206,12 @@ export async function getProgram() {
     const dayBlocks = (blocksByDay[day.id] || [])
       .sort((a, b) => a.sort_order - b.sort_order || new Date(a.created_at) - new Date(b.created_at))
       .map(b => ({
-        id:           b.id,
-        name:         b.name,
-        sort_order:   b.sort_order,
-        rest_seconds: b.rest_seconds ?? day.rest_seconds ?? 90,
-        exercises:    allExercises.filter(e =>
+        id:            b.id,
+        name:          b.name,
+        sort_order:    b.sort_order,
+        rest_seconds:  b.rest_seconds ?? day.rest_seconds ?? 90,
+        timer_enabled: b.timer_enabled ?? true,
+        exercises:     allExercises.filter(e =>
           e.item_type !== 'activity' && e.workout_block_id === b.id
         ),
       }))
@@ -582,6 +583,138 @@ export async function insertCompletedSession(
   }
 
   return workout
+}
+
+// Load a previously-completed workout + its sets, for the "edit completed
+// workout" flow. Returns { workout, sets } or null if not found / not owned.
+export async function getCompletedWorkout(workoutId, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  if (!workoutId) throw new Error('No workout id')
+  const [{ data: workout, error: wErr }, { data: sets, error: sErr }] = await Promise.all([
+    withTimeout(
+      supabase.from('workouts').select('*')
+        .eq('id', workoutId).eq('user_id', uid).maybeSingle(),
+      5000, 'Load completed workout'
+    ),
+    withTimeout(
+      supabase.from('workout_sets').select('*')
+        .eq('workout_id', workoutId)
+        .order('set_number', { ascending: true }),
+      5000, 'Load completed sets'
+    ),
+  ])
+  if (wErr) throw new Error(`Load workout failed: ${wErr.message}`)
+  if (sErr) throw new Error(`Load sets failed: ${sErr.message}`)
+  if (!workout) return null
+  return { workout, sets: sets || [] }
+}
+
+// Update a completed workout: replace its sets in-place. Used by the
+// "Edit completed workout" flow when the user wants to fix a logging mistake.
+// We DELETE all existing sets for this workout and INSERT the new ones —
+// simpler than per-row diffing and the volume is tiny.
+export async function updateCompletedSession(
+  workoutId, exerciseSets, activityLogs, uid, trackModeMap = {},
+  kind = 'workout', activityName = null,
+) {
+  if (!uid) throw new Error('Not authenticated')
+  if (!workoutId) throw new Error('No workout id')
+
+  // Verify ownership before destructive ops.
+  const { data: existing, error: lookupErr } = await withTimeout(
+    supabase.from('workouts').select('id, user_id, kind, activity_name')
+      .eq('id', workoutId).eq('user_id', uid).maybeSingle(),
+    5000, 'Verify workout'
+  )
+  if (lookupErr) throw new Error(`Verify failed: ${lookupErr.message}`)
+  if (!existing) throw new Error('Workout not found')
+
+  // Build new rows the same way as insertCompletedSession.
+  const rowsToInsert = []
+  const persistExercises = kind === 'workout'
+  const persistActivities = kind === 'activity'
+    ? Object.fromEntries(Object.entries(activityLogs || {}).filter(([n]) => n === activityName))
+    : {}
+
+  if (persistExercises) for (const [exerciseName, sets] of Object.entries(exerciseSets || {})) {
+    const isCheck = trackModeMap[exerciseName] === 'check'
+    sets.forEach((set, idx) => {
+      if (isCheck) {
+        if (!set.checked) return
+        rowsToInsert.push({
+          user_id: uid, workout_id: workoutId, exercise_name: exerciseName,
+          set_number: idx + 1, weight_kg: 0, reps: 0, checked: true,
+          notes: '', is_warmup: false, rir: null, rpe: null,
+        })
+        return
+      }
+      const w = typeof set.weight_kg === 'number' ? set.weight_kg : parseFloat(set.weight_kg)
+      const r = parseInt(set.reps)
+      if (!isNaN(w) || !isNaN(r)) {
+        const rir = set.rir === '' || set.rir == null ? null : parseFloat(set.rir)
+        const rpe = set.rpe === '' || set.rpe == null ? null : parseFloat(set.rpe)
+        rowsToInsert.push({
+          user_id: uid, workout_id: workoutId, exercise_name: exerciseName,
+          set_number: idx + 1,
+          weight_kg: isNaN(w) ? 0 : w, reps: isNaN(r) ? 0 : r,
+          checked: false, notes: '',
+          is_warmup: !!set.is_warmup, is_drop_set: !!set.is_drop_set,
+          rir: isNaN(rir) ? null : rir, rpe: isNaN(rpe) ? null : rpe,
+        })
+      }
+    })
+  }
+
+  const numOrNull = (v) => {
+    if (v === '' || v == null) return null
+    const n = typeof v === 'number' ? v : parseFloat(v); return isNaN(n) ? null : n
+  }
+  const intOrNull = (v) => {
+    if (v === '' || v == null) return null
+    const n = typeof v === 'number' ? v : parseInt(v); return isNaN(n) ? null : n
+  }
+  for (const [actName, log] of Object.entries(persistActivities)) {
+    const duration = numOrNull(log.duration_min)
+    const distance = numOrNull(log.distance_km)
+    const intensity = intOrNull(log.intensity)
+    const avgHr = intOrNull(log.avg_hr)
+    const cals = numOrNull(log.calories)
+    const rnds = intOrNull(log.rounds)
+    const elev = numOrNull(log.elevation_m)
+    const notes = log.notes || ''
+    const hasAny = !!log.checked || notes.length > 0 ||
+      [duration, distance, intensity, avgHr, cals, rnds, elev].some(v => v != null)
+    if (!hasAny) continue
+    rowsToInsert.push({
+      user_id: uid, workout_id: workoutId, exercise_name: actName,
+      set_number: 1, weight_kg: 0, reps: 0, checked: !!log.checked, notes,
+      duration_min: duration, distance_km: distance, intensity,
+      avg_hr: avgHr, calories: cals, rounds: rnds, elevation_m: elev,
+    })
+  }
+
+  // Wipe old rows then insert new ones. RLS scopes both to this user.
+  const { error: dErr } = await withTimeout(
+    supabase.from('workout_sets').delete().eq('workout_id', workoutId).eq('user_id', uid),
+    5000, 'Wipe old sets'
+  )
+  if (dErr) throw new Error(`Wipe old sets failed: ${dErr.message}`)
+
+  if (rowsToInsert.length) {
+    const { error: iErr } = await withTimeout(
+      supabase.from('workout_sets').insert(rowsToInsert),
+      5000, 'Save edited sets'
+    )
+    if (iErr) throw new Error(`Save edited sets failed: ${iErr.message}`)
+  }
+
+  // Bump updated_at so timeline reflects the edit.
+  const { error: uErr } = await withTimeout(
+    supabase.from('workouts').update({ updated_at: new Date().toISOString() })
+      .eq('id', workoutId).eq('user_id', uid),
+    5000, 'Touch workout'
+  )
+  if (uErr) throw new Error(`Touch workout failed: ${uErr.message}`)
 }
 
 // Delete a draft (cascades workout_sets — though drafts shouldn't have any).
