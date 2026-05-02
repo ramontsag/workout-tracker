@@ -122,6 +122,18 @@ export default function App() {
     go('workout')
   }
 
+  // Same destination the floating pill uses, but driven by an internal event
+  // so a deep child (e.g. WorkoutDay's "active workout already running" modal)
+  // can ask to navigate without re-prop-drilling.
+  useEffect(() => {
+    const onGoto = (e) => {
+      const { dayId, blockId } = e.detail || {}
+      handleFloatingTimerTap(dayId, blockId)
+    }
+    window.addEventListener('wt:goto-active-workout', onGoto)
+    return () => window.removeEventListener('wt:goto-active-workout', onGoto)
+  }, [program]) // eslint-disable-line
+
   // ── Render ────────────────────────────────────────────────────
   const renderScreen = () => {
     if (screen === 'loading') {

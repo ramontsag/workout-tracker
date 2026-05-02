@@ -5,7 +5,7 @@ import {
   addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames,
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
   insertCompletedSession, updateCompletedSession,
-  getTemplates,
+  getTemplates, getLastSetsByExercise,
 } from '../supabase'
 import {
   displayWeight, parseInputWeight, unitLabel, kgToInputValue,
@@ -14,6 +14,8 @@ import {
 } from '../utils/units'
 import { DEFAULT_ACTIVITY_FIELDS } from '../data/commonActivities'
 import { useRestTimer } from '../useRestTimer'
+import { useActiveWorkout } from '../useActiveWorkout'
+import { getState as getActiveWorkout, start as startActiveWorkout, clear as clearActiveWorkout } from '../activeWorkoutStore'
 import CatalogPickerModal from './CatalogPickerModal'
 import EditDayModal from './EditDayModal'
 import RestPickerSheet from './RestPickerSheet'
@@ -355,12 +357,19 @@ function ExerciseCard({
                       placeholder={intensityField.toUpperCase()}
                       value={set[intensityField] ?? ''}
                       onChange={e => {
+                        // Store raw input so trailing decimals ("1." → "1.5")
+                        // aren't eaten by parseFloat round-tripping. Strip
+                        // anything that isn't a digit / dot / comma.
+                        const raw = e.target.value.replace(/[^0-9.,]/g, '')
+                        onUpdate(idx, intensityField, raw)
+                      }}
+                      onBlur={e => {
                         const v = e.target.value
-                        if (v === '') return onUpdate(idx, intensityField, '')
+                        if (v === '') return
                         const n = parseFloat(v.replace(',', '.'))
-                        if (isNaN(n)) return
+                        if (isNaN(n)) { onUpdate(idx, intensityField, ''); return }
                         const clamped = Math.max(0, Math.min(10, n))
-                        onUpdate(idx, intensityField, String(clamped))
+                        if (String(clamped) !== v) onUpdate(idx, intensityField, String(clamped))
                       }}
                       onFocus={e => e.target.select()}
                     />
@@ -709,6 +718,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   )
 
   const [lastSession, setLastSession] = useState(null)
+  // Per-exercise last sets — keyed by exercise name, sourced from the most
+  // recent COMPLETED workout that included that exercise (regardless of day).
+  // Falls back to lastSession.sets when an exercise has no global history.
+  const [lastByExercise, setLastByExercise] = useState({})
   const [status,      setStatus]      = useState('idle') // idle | saving | saved
   const [errMsg,      setErrMsg]      = useState('')
   const [volumeMsg,   setVolumeMsg]   = useState('')
@@ -770,6 +783,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   const [needsStart, setNeedsStart] = useState(
     () => !cached?.workoutId && !cached?.startedAt && !editingMode
   )
+  // Shown when the user taps Start but a different workout is already active —
+  // prevents two workouts from running at once.
+  const [activeBlockedBy, setActiveBlockedBy] = useState(null) // { dayName, blockName, dayId, blockId } | null
 
   // Whether a template already exists for this block — controls the
   // visibility of the "Save as template…" menu item so the user can't keep
@@ -866,7 +882,14 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     setDraftLoaded(true)
     // Resuming an in-progress workout: skip the Start prompt and adopt the
     // draft's started_at so the duration counter shows the real elapsed time.
-    if (draft.started_at) setWorkoutStartedAt(draft.started_at)
+    if (draft.started_at) {
+      setWorkoutStartedAt(draft.started_at)
+      // Adopt as the active workout so the floating pill picks it up.
+      startActiveWorkout({
+        dayId: day.id, blockId, dayName: day.name, blockName,
+        startedAt: draft.started_at,
+      })
+    }
     setNeedsStart(false)
   }
 
@@ -888,11 +911,30 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     getExerciseBests(names, userId).then(setExerciseBests).catch(() => {})
   }, [exerciseNamesKey, userId]) // eslint-disable-line
 
+  // Per-exercise last sets — refetch when the live exercise list changes so
+  // mid-workout adds also surface their previous-session data immediately.
+  // This is global (across days) — the same exercise on a different day still
+  // shows its last logged sets.
+  useEffect(() => {
+    if (!userId) return
+    const names = exerciseItems.map(e => e.name)
+    if (names.length === 0) { setLastByExercise({}); return }
+    let cancelled = false
+    getLastSetsByExercise(names, userId)
+      .then(map => { if (!cancelled) setLastByExercise(map || {}) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [exerciseNamesKey, userId]) // eslint-disable-line
+
   // Recompute PR flags whenever sets change.
   // Checks each non-warmup set against three record types in priority order:
   //   weight PR (heaviest ever) > rep PR (most reps at this weight) > e1RM PR
   // Only the highest-priority hit on the best-qualifying set is surfaced.
+  // Debounced so rapid typing in weight/reps inputs doesn't trigger a full
+  // recompute on every keystroke — the flag is only meaningful once a value
+  // has settled anyway.
   useEffect(() => {
+    const id = setTimeout(() => {
     const newFlags = {}
     for (const [exName, exSets] of Object.entries(sets)) {
       const bests = exerciseBests[exName] || { bestE1RM: 0, bestWeight: 0, maxRepsAtWeight: {} }
@@ -939,6 +981,8 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       if (winner) newFlags[exName] = winner
     }
     setPrFlags(newFlags)
+    }, 200)
+    return () => clearTimeout(id)
   }, [sets, exerciseBests, unit])
 
   // ── Reconcile prescription edits from EditDayModal into the live session ──
@@ -1091,10 +1135,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     return () => clearTimeout(id)
   }, [sets, activityLogs, exerciseList, draftLoaded]) // eslint-disable-line
 
-  // Synchronous local mirror — writes on every change so same-tab navigation
-  // (e.g. into ExerciseHistory and back) restores instantly. Only writes when
-  // there's actual content OR the workout has been started (so the duration
-  // timer survives an early ExerciseHistory hop).
+  // Local mirror — writes on a short debounce so rapid typing doesn't trigger
+  // a JSON.stringify of the full state on every keystroke. Same-tab navigation
+  // (e.g. into ExerciseHistory and back) still restores instantly because the
+  // value is well under one keystroke window away.
   useEffect(() => {
     if (!lsKey) return
     const hasContent = stateHasContent(sets, activityLogs, exerciseList)
@@ -1102,7 +1146,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       clearLsDraft(lsKey)
       return
     }
-    writeLsDraft(lsKey, { sets, activityLogs, exerciseList, workoutId, startedAt: workoutStartedAt })
+    const id = setTimeout(() => {
+      writeLsDraft(lsKey, { sets, activityLogs, exerciseList, workoutId, startedAt: workoutStartedAt })
+    }, 250)
+    return () => clearTimeout(id)
   }, [lsKey, sets, activityLogs, exerciseList, workoutId, workoutStartedAt]) // eslint-disable-line
 
   // Flush on tab hide (mobile background) + unmount.
@@ -1231,6 +1278,14 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   }
 
   const getLastSets = (exName) => {
+    // Prefer the global per-exercise history so the "Last time" hint and the
+    // per-row preview reflect what the user did with this exercise most
+    // recently — even if it was on a different training day or a different
+    // workout block.
+    const global = lastByExercise[exName]
+    if (global && Array.isArray(global.sets) && global.sets.length > 0) {
+      return global.sets
+    }
     if (!lastSession) return []
     return lastSession.sets.filter(s => s.exercise_name === exName)
   }
@@ -1461,6 +1516,11 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       if (workoutIdRef.current) {
         try { await discardDraft(workoutIdRef.current, userId) } catch {}
       }
+      // Release the global "active workout" lock so other workouts can start.
+      const existing = getActiveWorkout()
+      if (existing.active && existing.dayId === day.id && existing.blockId === blockId) {
+        clearActiveWorkout()
+      }
     } catch (e) {
       setErrMsg(e.message || 'Failed to save — please try again.')
       setStatus('idle')
@@ -1526,6 +1586,16 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         weekday: 'short', month: 'short', day: 'numeric',
       })
     : null
+  // Today's date — shown in small grey letters next to the workout name in
+  // the header, so the user can see at a glance what date this session is.
+  const todayLabel = new Date().toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  })
+  // Headline title in the workout header. Prefer the block name (e.g. "Push")
+  // when meaningful; fall back to the day name + focus.
+  const headlineTitle = (blockName && blockName !== 'Workout')
+    ? blockName
+    : (day.focus?.trim() || day.name)
 
 
   return (
@@ -1534,17 +1604,11 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         <header className="workout-header">
           <button className="back-btn" onClick={onBack}>←</button>
           <div className="workout-header__info">
-            <div className="workout-header__name">
-              {day.name}
-              {blockName && blockName !== 'Workout' && (
-                <>
-                  <span style={{ color: 'var(--text-muted)' }}> — </span>
-                  <span style={{ color: titleColor }}>{blockName}</span>
-                </>
-              )}
+            <div className="workout-header__name workout-header__name--accent">
+              {headlineTitle}
             </div>
+            <div className="workout-header__date">{todayLabel}</div>
           </div>
-          {lastDate && <div className="workout-header__last">Last: {lastDate}</div>}
           <div className="workout-header-menu-wrap">
             <button
               className="workout-gear-btn"
@@ -1809,8 +1873,22 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                 <button
                   className="modal-btn-primary"
                   onClick={() => {
-                    setWorkoutStartedAt(new Date().toISOString())
+                    // Block a second concurrent workout. If another workout is
+                    // active and it's not this one, surface the conflict modal
+                    // and let the user navigate to it (or cancel it) first.
+                    const existing = getActiveWorkout()
+                    if (existing.active &&
+                        (existing.dayId !== day.id || existing.blockId !== blockId)) {
+                      setActiveBlockedBy(existing)
+                      return
+                    }
+                    const startedAt = new Date().toISOString()
+                    setWorkoutStartedAt(startedAt)
                     setNeedsStart(false)
+                    startActiveWorkout({
+                      dayId: day.id, blockId, dayName: day.name, blockName,
+                      startedAt,
+                    })
                   }}
                 >Start</button>
                 <button
@@ -1826,6 +1904,41 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           </div>
         )
       })()}
+
+      {/* ── Already-active-workout block ─────────────────────
+          Triggered when the user taps Start while a different workout is
+          already in progress. Lets them jump to the active one (it's the
+          floating pill's normal target) or back out. */}
+      {activeBlockedBy && (
+        <div className="modal-backdrop" onClick={() => setActiveBlockedBy(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <h3 className="modal-title">A workout is already running</h3>
+            <p className="modal-body">
+              You have <strong>{activeBlockedBy.blockName && activeBlockedBy.blockName !== 'Workout' ? activeBlockedBy.blockName : (activeBlockedBy.dayName || 'a workout')}</strong> in
+              progress. Finish or cancel it before starting another.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="modal-btn-primary"
+                onClick={() => {
+                  const dest = activeBlockedBy
+                  setActiveBlockedBy(null)
+                  // Hand off to the parent's floating-timer tap path, which
+                  // navigates back to the active workout's screen.
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('wt:goto-active-workout', {
+                      detail: { dayId: dest.dayId, blockId: dest.blockId },
+                    }))
+                  }
+                }}
+              >Go to active workout</button>
+              <button className="modal-btn-cancel" onClick={() => setActiveBlockedBy(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Cancel workout confirmation ─────────────────────── */}
       {confirmCancel && (
@@ -1845,6 +1958,11 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                     try { await discardDraft(workoutIdRef.current, userId) } catch {}
                   }
                   setWorkoutStartedAt(null)
+                  // Release the active-workout lock if this is the active one.
+                  const existing = getActiveWorkout()
+                  if (existing.active && existing.dayId === day.id && existing.blockId === blockId) {
+                    clearActiveWorkout()
+                  }
                   onBack()
                 }}
               >Cancel workout</button>

@@ -520,7 +520,9 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.workout-header__name--accent { color: var(--accent); }
 .workout-header__focus  { font-size: 13px; font-weight: 600; color: var(--accent); margin-top: 2px; }
+.workout-header__date   { font-size: 11px; color: var(--text-muted); margin-top: 4px; letter-spacing: 0.4px; }
 .workout-header__last   { font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
 
 /* ── Sub-header (history / profile) ──────────────── */
@@ -2560,13 +2562,21 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 .rest-timer-btn:hover { color: var(--text); }
 
-/* Floating rest-timer pill — shown across all screens while resting. */
-.floating-timer {
+/* Floating pills container — stacks active-workout + rest-timer pills above
+   the bottom of the screen. Each pill has its own colour so the user can
+   tell them apart at a glance. */
+.floating-pills {
   position: fixed;
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
   z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.floating-pill {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -2581,9 +2591,18 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.floating-timer:active { transform: translateX(-50%) scale(0.97); }
-.floating-timer-label { font-variant-numeric: tabular-nums; }
-.floating-timer-arrow { opacity: 0.7; font-size: 16px; }
+.floating-pill:active { transform: scale(0.97); }
+.floating-pill-label { font-variant-numeric: tabular-nums; }
+.floating-pill-arrow { opacity: 0.7; font-size: 16px; }
+.floating-pill--workout {
+  color: var(--accent);
+  border-color: rgba(255, 85, 0, 0.45);
+  background: rgba(255, 85, 0, 0.10);
+}
+.floating-pill--rest {
+  color: var(--cyan, #22d3ee);
+  border-color: rgba(34, 211, 238, 0.40);
+}
 
 /* Timer on/off toggle in workout header */
 .timer-toggle {

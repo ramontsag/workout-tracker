@@ -535,7 +535,7 @@ export async function insertCompletedSession(
         rowsToInsert.push({
           user_id: uid, workout_id: workout.id, exercise_name: exerciseName,
           set_number: idx + 1, weight_kg: 0, reps: 0, checked: true,
-          notes: '', is_warmup: false, rir: null, rpe: null,
+          notes: '', is_warmup: false, is_drop_set: false, rir: null, rpe: null,
         })
         return
       }
@@ -579,6 +579,7 @@ export async function insertCompletedSession(
     rowsToInsert.push({
       user_id: uid, workout_id: workout.id, exercise_name: actName,
       set_number: 1, weight_kg: 0, reps: 0, checked: !!log.checked, notes,
+      is_warmup: false, is_drop_set: false,
       duration_min: duration, distance_km: distance, intensity,
       avg_hr: avgHr, calories: cals, rounds: rnds, elevation_m: elev,
     })
@@ -654,7 +655,7 @@ export async function updateCompletedSession(
         rowsToInsert.push({
           user_id: uid, workout_id: workoutId, exercise_name: exerciseName,
           set_number: idx + 1, weight_kg: 0, reps: 0, checked: true,
-          notes: '', is_warmup: false, rir: null, rpe: null,
+          notes: '', is_warmup: false, is_drop_set: false, rir: null, rpe: null,
         })
         return
       }
@@ -698,6 +699,7 @@ export async function updateCompletedSession(
     rowsToInsert.push({
       user_id: uid, workout_id: workoutId, exercise_name: actName,
       set_number: 1, weight_kg: 0, reps: 0, checked: !!log.checked, notes,
+      is_warmup: false, is_drop_set: false,
       duration_min: duration, distance_km: distance, intensity,
       avg_hr: avgHr, calories: cals, rounds: rnds, elevation_m: elev,
     })
@@ -984,6 +986,7 @@ export async function completeWorkout(
           checked:       true,
           notes:         '',
           is_warmup:     false,
+          is_drop_set:   false,
           rir:           null,
           rpe:           null,
         })
@@ -1046,6 +1049,8 @@ export async function completeWorkout(
       reps:          0,
       checked:       !!log.checked,
       notes,
+      is_warmup:     false,
+      is_drop_set:   false,
       duration_min:  duration,
       distance_km:   distance,
       intensity,
@@ -1089,6 +1094,59 @@ export async function completeWorkout(
 }
 
 // ── History ───────────────────────────────────────────────────
+
+// Returns the most recent set of sets for each exercise name, regardless of
+// which day or workout block they were performed in. Used by WorkoutDay so
+// the "Last time" hint always reflects what the user actually did with that
+// exercise, even if it was on a different training day.
+//
+// Shape: { [exerciseName]: { date, dayName, workoutId, sets: [...] } }
+// Sets are sorted by set_number ascending.
+export async function getLastSetsByExercise(exerciseNames, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const names = (exerciseNames || []).filter(Boolean)
+  if (names.length === 0) return {}
+
+  // Pull all completed sets for these exercises with their workout date,
+  // then pick the latest workout per name in JS. Volume is small (a few
+  // hundred rows max for a normal user) so this is cheap enough.
+  const { data, error } = await withTimeout(
+    supabase
+      .from('workout_sets')
+      .select('*, workout:workouts(id, completed_at, day_name, status)')
+      .eq('user_id', uid)
+      .in('exercise_name', names)
+      .order('set_number', { ascending: true }),
+    5000, 'Load last sets by exercise',
+  )
+  if (error) throw new Error(`Load last sets failed: ${error.message}`)
+
+  // Group by exercise → workout, ignoring drafts (status !== 'completed').
+  const byExercise = {}
+  for (const row of data || []) {
+    if (!row.workout || row.workout.status !== 'completed') continue
+    const ex = row.exercise_name
+    if (!byExercise[ex]) byExercise[ex] = {}
+    const wid = row.workout.id
+    if (!byExercise[ex][wid]) {
+      byExercise[ex][wid] = {
+        workoutId: wid,
+        date:      row.workout.completed_at,
+        dayName:   row.workout.day_name,
+        sets:      [],
+      }
+    }
+    byExercise[ex][wid].sets.push(row)
+  }
+
+  const out = {}
+  for (const ex of Object.keys(byExercise)) {
+    const workouts = Object.values(byExercise[ex])
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+    if (workouts[0]) out[ex] = workouts[0]
+  }
+  return out
+}
 
 export async function getExerciseHistory(exerciseName) {
   const { data, error } = await withTimeout(
