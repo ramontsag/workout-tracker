@@ -5,6 +5,7 @@ import {
   getActivityNames, getActivityHistory, bucketActivityByWeek,
   getBodyMeasurements,
   getStrengthHistory,
+  getGyms,
 } from '../supabase'
 import MainLiftsSetup from './MainLiftsSetup'
 import {
@@ -42,9 +43,15 @@ function fmtDate(iso) {
 }
 
 // ── Generic trend line ────────────────────────────────────────
-// data: [{ date: ISO, value: number }] — newest first OR oldest first.
+// data: [{ date: ISO, value: number, color?: string, gymName?: string }] —
+//   any order; sorted internally. `color` and `gymName` are optional; when
+//   present, the line and dots are coloured per-segment by gym, and the
+//   dominant gym for each contiguous run is rendered as a faint label.
+//
 // Caller is responsible for unit conversion before passing values in.
-function TrendLine({ data, fillColor = 'rgba(249,115,22,0.08)', strokeColor = 'var(--accent)' }) {
+const UNKNOWN_COLOR = 'var(--accent)'
+
+function TrendLine({ data, fillColor = 'rgba(249,115,22,0.08)', strokeColor = UNKNOWN_COLOR }) {
   if (!data || data.length < 2) return null
 
   // Render oldest → newest left-to-right.
@@ -65,11 +72,41 @@ function TrendLine({ data, fillColor = 'rgba(249,115,22,0.08)', strokeColor = 'v
   const toX = i => PL + (i / (sorted.length - 1)) * plotW
   const toY = v => PT + (1 - (v - yMin) / range) * plotH
 
-  const pts      = sorted.map((d, i) => ({ x: toX(i), y: toY(values[i]), iso: d.date }))
+  const pts = sorted.map((d, i) => ({
+    x:        toX(i),
+    y:        toY(values[i]),
+    iso:      d.date,
+    color:    d.color || null,
+    gymName:  d.gymName || null,
+    gymKey:   d.color ? d.color : '__none__',
+  }))
+  // Used for the area fill underneath; one polyline irrespective of segment.
   const polyline = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
   const guides   = [rawMax, (rawMin + rawMax) / 2, rawMin]
   const midIdx   = Math.floor((sorted.length - 1) / 2)
   const xIdxs    = [...new Set([0, midIdx, sorted.length - 1])]
+
+  // Segment runs: contiguous runs of points with the same gymKey. The line
+  // entering point i uses point i's colour, so a segment from run k to run
+  // k+1 visually "switches" at the boundary point.
+  const segments = []
+  for (let i = 1; i < pts.length; i++) {
+    segments.push({
+      from: pts[i - 1],
+      to:   pts[i],
+      stroke: pts[i].color || strokeColor,
+    })
+  }
+
+  // Group points into contiguous runs to label the "dominant" gym for each
+  // run. Only render the label when the run is wide enough to fit the name
+  // without overflowing — otherwise the chart gets cluttered fast.
+  const runs = []
+  for (let i = 0; i < pts.length; i++) {
+    const last = runs[runs.length - 1]
+    if (last && last.gymKey === pts[i].gymKey) last.points.push(pts[i])
+    else runs.push({ gymKey: pts[i].gymKey, gymName: pts[i].gymName, color: pts[i].color, points: [pts[i]] })
+  }
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" className="weight-graph">
@@ -88,12 +125,43 @@ function TrendLine({ data, fillColor = 'rgba(249,115,22,0.08)', strokeColor = 'v
         points={`${PL},${(PT + plotH).toFixed(1)} ${polyline} ${(W - PR).toFixed(1)},${(PT + plotH).toFixed(1)}`}
         fill={fillColor}
       />
-      <polyline points={polyline} fill="none"
-        stroke={strokeColor} strokeWidth="2"
-        strokeLinecap="round" strokeLinejoin="round" />
+      {/* Line segments — coloured by the entering point's gym so colour
+          switches happen at gym boundaries. */}
+      {segments.map((seg, i) => (
+        <line key={`s${i}`}
+          x1={seg.from.x.toFixed(1)} y1={seg.from.y.toFixed(1)}
+          x2={seg.to.x.toFixed(1)}   y2={seg.to.y.toFixed(1)}
+          stroke={seg.stroke}
+          strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" />
+      ))}
+      {/* Faint gym labels — one per contiguous run, centered under the run.
+          Skipped when the run is narrower than the label can fit. */}
+      {runs.map((run, i) => {
+        if (!run.gymName) return null
+        const xs = run.points.map(p => p.x)
+        const minX = Math.min(...xs)
+        const maxX = Math.max(...xs)
+        const w = maxX - minX
+        // Heuristic: ~6px per char + breathing room. Skip labels that won't fit.
+        if (w < (run.gymName.length * 5 + 8)) return null
+        const cx = (minX + maxX) / 2
+        return (
+          <text key={`gn${i}`}
+            x={cx.toFixed(1)}
+            y={(PT + plotH - 6).toFixed(1)}
+            textAnchor="middle"
+            fill={run.color || 'var(--text-muted)'}
+            opacity="0.45"
+            style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase' }}
+          >
+            {run.gymName}
+          </text>
+        )
+      })}
       {pts.map((p, i) => (
         <circle key={i} cx={p.x.toFixed(1)} cy={p.y.toFixed(1)}
-          r="3" fill={strokeColor} stroke="var(--bg)" strokeWidth="1.5" />
+          r="3" fill={p.color || strokeColor} stroke="var(--bg)" strokeWidth="1.5" />
       ))}
       {xIdxs.map(i => (
         <text key={i} x={toX(i).toFixed(1)} y={H - 5}
@@ -140,6 +208,22 @@ export default function ProgressScreen({ user, profile, onBack }) {
   const [strengthSeries,    setStrengthSeries] = useState([])
   const [strengthLoading,   setStrengthLoading] = useState(false)
   const [setupOpen,         setSetupOpen]      = useState(false)
+
+  // ── Gyms (for graph segment colours) ────────────────────
+  // Lookup map keyed by gym id → { color, name }. Workouts with a gym_id
+  // outside this map (e.g. a since-deleted gym) fall back to a neutral
+  // accent colour.
+  const [gymMap, setGymMap] = useState({})
+  useEffect(() => {
+    if (!user?.id) return
+    getGyms(user.id)
+      .then(list => {
+        const m = {}
+        for (const g of list) m[g.id] = { color: g.color, name: g.name }
+        setGymMap(m)
+      })
+      .catch(() => {})
+  }, [user?.id])
 
   // ── Body state ────────────────────────────────────────
   // selectedMetric: 'weight' or one of MEASURE_FIELDS keys (e.g. 'waist_cm')
@@ -280,11 +364,17 @@ export default function ProgressScreen({ user, profile, onBack }) {
   })()
 
   // Trend dataset for the chart, in user's display unit so the y-axis labels
-  // line up with the headline score.
-  const strengthTrend = strengthSeries.map(s => ({
-    date:  s.date,
-    value: unit === 'lbs' ? kgToLbs(s.totalE1RM) : s.totalE1RM,
-  }))
+  // line up with the headline score. Each point also carries gym metadata so
+  // TrendLine can colour line segments per-gym and label contiguous runs.
+  const strengthTrend = strengthSeries.map(s => {
+    const g = s.gymId ? gymMap[s.gymId] : null
+    return {
+      date:    s.date,
+      value:   unit === 'lbs' ? kgToLbs(s.totalE1RM) : s.totalE1RM,
+      color:   g?.color || null,
+      gymName: g?.name  || null,
+    }
+  })
 
   // ── Body tab derived ─────────────────────────────────────
   // Measurement fields shown in the dropdown — any field the user has logged

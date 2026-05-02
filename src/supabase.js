@@ -100,6 +100,109 @@ export async function getProfile() {
   return data
 }
 
+// ── Gyms ─────────────────────────────────────────────────────
+// Fixed colour rotation, assigned by creation order. Users never pick a
+// colour — the palette is curated to read well against the dark UI.
+export const GYM_COLORS = [
+  '#FF5500', // orange  (matches the app's accent)
+  '#A855F7', // purple
+  '#22C55E', // green
+  '#22D3EE', // cyan
+  '#FACC15', // yellow
+  '#EC4899', // pink
+  '#60A5FA', // blue
+  '#F97316', // amber
+]
+
+export async function getGyms(uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data, error } = await withTimeout(
+    supabase.from('gyms').select('id, name, color, created_at')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: true }),
+    5000, 'Load gyms'
+  )
+  if (error) throw new Error(`Load gyms failed: ${error.message}`)
+  return data || []
+}
+
+// Picks the next colour in the fixed palette by cycling through what's
+// already used. No user picker — colours stay consistent across the app.
+function nextGymColor(existing) {
+  const used = new Set((existing || []).map(g => g.color))
+  for (const c of GYM_COLORS) if (!used.has(c)) return c
+  // All palette entries used at least once — recycle by creation order.
+  return GYM_COLORS[(existing?.length || 0) % GYM_COLORS.length]
+}
+
+// Creates a new gym, auto-assigning a colour. Set `makeActive=true` to also
+// flip profiles.active_gym_id in the same call (the typical add-gym flow).
+export async function createGym(name, uid, { makeActive = true } = {}) {
+  if (!uid) throw new Error('Not authenticated')
+  const trimmed = (name || '').trim()
+  if (!trimmed) throw new Error('Enter a gym name')
+
+  const existing = await getGyms(uid)
+  if (existing.some(g => g.name.toLowerCase() === trimmed.toLowerCase())) {
+    throw new Error('You already have a gym with that name')
+  }
+  const color = nextGymColor(existing)
+  const { data, error } = await withTimeout(
+    supabase.from('gyms')
+      .insert({ user_id: uid, name: trimmed, color })
+      .select().single(),
+    5000, 'Create gym'
+  )
+  if (error) throw new Error(`Create gym failed: ${error.message}`)
+  if (makeActive) await setActiveGym(data.id, uid)
+  return data
+}
+
+// Used for renames. Color is server-assigned and not editable here.
+export async function updateGym(id, fields, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  if (!id)  throw new Error('No gym id')
+  const patch = {}
+  if (typeof fields.name === 'string') {
+    const trimmed = fields.name.trim()
+    if (!trimmed) throw new Error('Enter a gym name')
+    patch.name = trimmed
+  }
+  if (Object.keys(patch).length === 0) return null
+  const { data, error } = await withTimeout(
+    supabase.from('gyms').update(patch).eq('id', id).eq('user_id', uid).select().single(),
+    5000, 'Update gym'
+  )
+  if (error) throw new Error(`Update gym failed: ${error.message}`)
+  return data
+}
+
+// Deleting a gym leaves historical workouts pointing at NULL (FK is ON DELETE
+// SET NULL). The graph renders those points in a neutral "unknown" colour.
+export async function deleteGym(id, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  if (!id)  throw new Error('No gym id')
+  const { error } = await withTimeout(
+    supabase.from('gyms').delete().eq('id', id).eq('user_id', uid),
+    5000, 'Delete gym'
+  )
+  if (error) throw new Error(`Delete gym failed: ${error.message}`)
+}
+
+// Sets profiles.active_gym_id. Pass null to clear (e.g. user wants no gym
+// stamped on workouts for now).
+export async function setActiveGym(gymId, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  // Upsert (not update) so accounts whose profile row was never created get
+  // one on first gym set instead of silently 0-rowing the update.
+  const { error } = await withTimeout(
+    supabase.from('profiles')
+      .upsert({ id: uid, active_gym_id: gymId }, { onConflict: 'id' }),
+    5000, 'Set active gym'
+  )
+  if (error) throw new Error(`Set active gym failed: ${error.message}`)
+}
+
 // ── Program ───────────────────────────────────────────────────
 
 // Auto-creates 7 empty training_days rows (Monday → Sunday) on first sign-in
@@ -444,7 +547,10 @@ export async function getInProgressWorkout(trainingDayId, blockId, uid) {
 // Insert (workoutId omitted) or update (workoutId provided) the draft.
 // draftState is whatever JSON-serialisable shape the caller wants to
 // restore on resume — typically { sets, activityLogs, exerciseList }.
-export async function upsertDraft({ workoutId, trainingDayId, workoutBlockId = null, dayLabel, draftState }, uid) {
+// gymId is captured at start time so that a mid-workout gym switch doesn't
+// retroactively change the stamp on this session — only future workouts use
+// the new gym. Pass null to leave unstamped.
+export async function upsertDraft({ workoutId, trainingDayId, workoutBlockId = null, dayLabel, draftState, gymId = null }, uid) {
   if (!uid) throw new Error('Not authenticated')
 
   if (workoutId) {
@@ -475,6 +581,7 @@ export async function upsertDraft({ workoutId, trainingDayId, workoutBlockId = n
         started_at:       nowIso,
         updated_at:       nowIso,
         draft_state:      draftState,
+        gym_id:           gymId,
       })
       .select('id, started_at, updated_at')
       .single(),
@@ -493,7 +600,7 @@ export async function upsertDraft({ workoutId, trainingDayId, workoutBlockId = n
 // kind='activity', activityName='Run': persists ONLY that activity's log.
 export async function insertCompletedSession(
   { trainingDayId, dayLabel, kind = 'workout', activityName = null,
-    workoutBlockId = null,
+    workoutBlockId = null, gymId = null,
     exerciseSets = {}, activityLogs = {}, trackModeMap = {} },
   uid,
 ) {
@@ -510,6 +617,9 @@ export async function insertCompletedSession(
       kind,
       activity_name:    kind === 'activity' ? activityName : null,
       workout_block_id: kind === 'workout' ? workoutBlockId : null,
+      // Activities are not "at a gym" by design (running, mobility, etc.) so
+      // gym_id is only stamped on workout-kind sessions.
+      gym_id:           kind === 'workout' ? gymId : null,
       started_at:       completedAt,
       completed_at:     completedAt,
       updated_at:       completedAt,
@@ -755,7 +865,7 @@ export async function getCompletedSessionsThisWeek(uid, trainingDayId) {
   const { data, error } = await withTimeout(
     supabase
       .from('workouts')
-      .select('id, kind, activity_name, workout_block_id, completed_at')
+      .select('id, kind, activity_name, workout_block_id, completed_at, gym_id')
       .eq('user_id', uid)
       .eq('training_day_id', trainingDayId)
       .eq('status', 'completed')
@@ -1205,7 +1315,8 @@ export async function getWeeklyProgress(uid) {
       5000, 'Load weekly target'
     ),
     withTimeout(
-      supabase.from('workouts').select('id, day_name, training_day_id')
+      supabase.from('workouts')
+        .select('id, day_name, training_day_id, kind, activity_name, workout_block_id')
         .eq('user_id', uid)
         .eq('status', 'completed')
         .gte('completed_at', weekStart),
@@ -1255,11 +1366,39 @@ export async function getWeeklyProgress(uid) {
     .map(w => w.training_day_id)
     .filter(Boolean)
 
+  // Per-day completion breakdown — used by the Home day-card "1/3" badge.
+  // Workouts are de-duped by workout_block_id (so re-saving the same block
+  // doesn't double-count); activities are de-duped by activity_name.
+  // Workouts with no block_id are bucketed under '_default' so legacy/orphan
+  // sessions still register as one completion.
+  const dayCompletion = {}
+  for (const w of weekWorkouts) {
+    if (!w.training_day_id) continue
+    if (!dayCompletion[w.training_day_id]) {
+      dayCompletion[w.training_day_id] = { blocks: new Set(), activities: new Set() }
+    }
+    const slot = dayCompletion[w.training_day_id]
+    if (w.kind === 'activity' && w.activity_name) {
+      slot.activities.add(w.activity_name)
+    } else {
+      slot.blocks.add(w.workout_block_id || '_default')
+    }
+  }
+  // Convert sets → counts for the consumer.
+  const dayCompletionCounts = {}
+  for (const [dayId, slot] of Object.entries(dayCompletion)) {
+    dayCompletionCounts[dayId] = {
+      blocks:     slot.blocks.size,
+      activities: slot.activities.size,
+    }
+  }
+
   return {
     completed, target,
     workouts: exerciseWorkoutCount,
     activities: activityCount,
     completedDayIds,
+    dayCompletion: dayCompletionCounts,
   }
 }
 
@@ -1404,7 +1543,7 @@ export async function getStrengthHistory(uid, exerciseNames) {
   const { data, error } = await withTimeout(
     supabase
       .from('workout_sets')
-      .select('exercise_name, weight_kg, reps, workout:workouts(id, completed_at)')
+      .select('exercise_name, weight_kg, reps, workout:workouts(id, completed_at, gym_id)')
       .eq('user_id', uid)
       .in('exercise_name', exerciseNames)
       .gt('weight_kg', 0)
@@ -1416,15 +1555,20 @@ export async function getStrengthHistory(uid, exerciseNames) {
   if (error) throw new Error(`Load strength failed: ${error.message}`)
 
   // Reduce to one entry per (workout, exercise) — keeping the max e1RM that
-  // workout produced for that lift.
-  const byWorkout = {}  // { workoutId: { date, ex: { name: maxE1RMkg } } }
+  // workout produced for that lift. gymId is captured per-workout so the
+  // graph can colour each point by where the session was logged.
+  const byWorkout = {}  // { workoutId: { date, gymId, ex: { name: maxE1RMkg } } }
   for (const row of data || []) {
     const wid = row.workout?.id
     if (!wid) continue
     const w = Number(row.weight_kg)
     const r = Number(row.reps)
     const e1rm = w * (1 + r / 30)
-    if (!byWorkout[wid]) byWorkout[wid] = { date: row.workout.completed_at, ex: {} }
+    if (!byWorkout[wid]) byWorkout[wid] = {
+      date: row.workout.completed_at,
+      gymId: row.workout.gym_id || null,
+      ex: {},
+    }
     const ex = byWorkout[wid].ex
     if (!ex[row.exercise_name] || e1rm > ex[row.exercise_name]) {
       ex[row.exercise_name] = e1rm
@@ -1444,6 +1588,7 @@ export async function getStrengthHistory(uid, exerciseNames) {
     }
     series.push({
       date:        w.date,
+      gymId:       w.gymId,
       perExercise: { ...bestSoFar },
       totalE1RM:   Object.values(bestSoFar).reduce((a, b) => a + b, 0),
     })
@@ -1735,10 +1880,13 @@ export async function getAllKnownExerciseNames(uid) {
 // since drops aren't real top-set strength).
 export async function getVolumeHistory(exerciseName, uid, limit = 200) {
   if (!uid) throw new Error('Not authenticated')
+  // Pull set rows joined with their workout so we can group volume per
+  // session, plus the workout's gym_id so the Lifts graph can colour each
+  // point by where that session was logged.
   const { data, error } = await withTimeout(
     supabase
       .from('workout_sets')
-      .select('weight_kg, reps, is_warmup, is_drop_set, workout:workouts(id, completed_at, day_name)')
+      .select('weight_kg, reps, is_warmup, is_drop_set, workout:workouts(id, completed_at, day_name, gym_id)')
       .eq('exercise_name', exerciseName)
       .eq('user_id', uid)
       .order('workout_id', { ascending: false }),
@@ -1758,6 +1906,7 @@ export async function getVolumeHistory(exerciseName, uid, limit = 200) {
         workoutId:   wid,
         date:        row.workout.completed_at,
         dayName:     row.workout.day_name,
+        gymId:       row.workout.gym_id || null,
         totalVolume: 0,
         maxE1RMkg:   0,
       }

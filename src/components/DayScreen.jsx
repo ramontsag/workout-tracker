@@ -5,6 +5,7 @@ import {
   insertCompletedSession,
   addExerciseToProgram,
   getAllKnownExerciseNames,
+  getGyms,
 } from '../supabase'
 import WorkoutBuilderModal from './WorkoutBuilderModal'
 import {
@@ -206,8 +207,11 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
 
   // Per-week completion state, keyed by block id (for workouts) and activity
   // name. Hydrated from DB on mount.
-  const [workoutDoneByBlock, setWorkoutDoneByBlock] = useState({})  // { [blockId]: ISO }
+  const [workoutDoneByBlock, setWorkoutDoneByBlock] = useState({})  // { [blockId]: { at, gymId } }
   const [activityDoneAt, setActivityDoneAt]         = useState({})  // { [name]: ISO }
+  // Gym lookup so the workout-card can show a small coloured chip with the
+  // gym name next to the completed time.
+  const [gymMap, setGymMap]                         = useState({})  // { [id]: { name, color } }
   const [activitySaving, setActivitySaving]         = useState({})
   const [builderOpen, setBuilderOpen]               = useState(false)
 
@@ -237,18 +241,24 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
     let cancelled = false
     ;(async () => {
       try {
-        const sessions = await getCompletedSessionsThisWeek(userId, day.id)
+        const [sessions, gyms] = await Promise.all([
+          getCompletedSessionsThisWeek(userId, day.id),
+          getGyms(userId).catch(() => []),
+        ])
         if (cancelled) return
+        const gMap = {}
+        for (const g of gyms) gMap[g.id] = { name: g.name, color: g.color }
         const blockMap = {}
         const actMap = {}
         for (const s of sessions) {
           if (s.kind === 'workout') {
             const key = s.workout_block_id || '_default'
-            if (!blockMap[key]) blockMap[key] = s.completed_at
+            if (!blockMap[key]) blockMap[key] = { at: s.completed_at, gymId: s.gym_id || null }
           } else if (s.kind === 'activity' && s.activity_name) {
             actMap[s.activity_name] = s.completed_at
           }
         }
+        setGymMap(gMap)
         setWorkoutDoneByBlock(blockMap)
         setActivityDoneAt(actMap)
       } catch { /* non-fatal */ }
@@ -350,7 +360,8 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
   // Helper that maps a block to its current status for the card UI.
   const statusForBlock = (b) => {
     const key = b.id || '_default'
-    if (workoutDoneByBlock[key]) return { kind: 'completed', at: workoutDoneByBlock[key] }
+    const done = workoutDoneByBlock[key]
+    if (done) return { kind: 'completed', at: done.at, gymId: done.gymId }
     return { kind: 'not_started' }
   }
 
@@ -392,6 +403,19 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
                       {status.kind === 'completed'
                         ? <span className="day-workout-card__status-done">
                             ✓ Completed {new Date(status.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                            {status.gymId && gymMap[status.gymId] && (
+                              <span
+                                className="gym-chip gym-chip--readonly"
+                                style={{ marginLeft: 8 }}
+                                title={`Logged at ${gymMap[status.gymId].name}`}
+                              >
+                                <span
+                                  className="gym-chip__dot"
+                                  style={{ background: gymMap[status.gymId].color }}
+                                />
+                                <span className="gym-chip__name">{gymMap[status.gymId].name}</span>
+                              </span>
+                            )}
                           </span>
                         : <span className="day-workout-card__status-idle">Tap to start workout</span>}
                     </div>

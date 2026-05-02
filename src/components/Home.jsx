@@ -316,6 +316,15 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
             const typeClass = `day-card--${indicatorType}`
             const hasDraft  = draftDayIds.has(day.id)
             const isDone    = !!weeklyProgress?.completedDayIds?.includes(day.id)
+            // Per-day completion badge ("2/3") — only meaningful on days with
+            // multiple items. Hidden on rest/empty days and on single-item
+            // days where the ✓ already implies "all done".
+            const dayCompletion = weeklyProgress?.dayCompletion?.[day.id]
+            const totalItems    = blockCount + actCount
+            const doneItems     = dayCompletion
+              ? Math.min(totalItems, (dayCompletion.blocks || 0) + (dayCompletion.activities || 0))
+              : 0
+            const showBadge     = isDone && totalItems > 1 && doneItems > 0
 
             return (
               <div
@@ -348,13 +357,19 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                 </div>
                 <div className="day-card__indicator-wrap">
                   <div className={`day-card__indicator-circle day-card__indicator-circle--${indicatorType}${isDone ? ' day-card__indicator-circle--done' : ''}`}
-                    title={isDone ? 'Completed this week' : undefined}
+                    title={isDone ? `Completed ${doneItems}/${totalItems} this week` : undefined}
                     aria-label={isDone ? 'Completed' : undefined}
                   >
                     {isDone
                       ? <span className="day-card__indicator-check">✓</span>
                       : <div className="day-card__indicator-dash" />}
                   </div>
+                  {showBadge && (
+                    <span
+                      className="day-card__progress-badge"
+                      title={`${doneItems} of ${totalItems} items done this week`}
+                    >{doneItems}/{totalItems}</span>
+                  )}
                 </div>
               </div>
             )

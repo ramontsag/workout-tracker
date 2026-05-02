@@ -444,8 +444,23 @@ a { color: inherit; text-decoration: none; }
 .day-card__indicator-wrap {
   display: flex;
   align-items: center;
+  gap: 6px;
   padding-right: 14px;
   flex-shrink: 0;
+}
+/* "1/3"-style completion badge — only rendered on hybrid / multi-item days
+   once the user has checked off at least one item. Sits next to the ✓. */
+.day-card__progress-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  background: var(--surface3, rgba(255,255,255,0.06));
+  border: 1px solid var(--border, #2c3340);
+  border-radius: 999px;
+  padding: 2px 7px;
+  line-height: 1.2;
 }
 .day-card__indicator-circle {
   width: 26px;
@@ -3457,6 +3472,131 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .rest-picker-item:active { background: var(--surface2); }
 .rest-picker-item--on { color: var(--accent, #ff5500); font-weight: 700; }
 .rest-picker-check { color: var(--accent, #ff5500); }
+
+/* ── Gym picker sheet (Start workout modal) ───────────────── */
+.gym-picker-sheet { max-height: 80vh; }
+.gym-picker-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gym-picker-row { display: flex; align-items: center; gap: 6px; }
+.gym-picker-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  background: var(--surface2, #161b22);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.gym-picker-item:active { background: var(--surface3); }
+.gym-picker-item--on { border-color: var(--accent); }
+.gym-picker-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.08);
+}
+.gym-picker-name { flex: 1; }
+.gym-picker-check { color: var(--accent); font-weight: 800; }
+.gym-picker-edit-btn,
+.gym-picker-delete-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.gym-picker-delete-btn:hover { color: #ef4444; border-color: #ef4444; }
+.gym-picker-edit {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+.gym-picker-edit-input { flex: 1; }
+.gym-picker-save,
+.gym-picker-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+}
+.gym-picker-save { color: var(--accent); border-color: var(--accent); }
+.gym-picker-add {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.gym-picker-add:hover { color: var(--accent); border-color: var(--accent); }
+.gym-picker-error {
+  padding: 0 16px 12px;
+  color: #ef4444;
+  font-size: 13px;
+}
+
+/* Inline gym chip — used on the Start-workout modal and (optionally) on
+   completed-workout cards as a tiny coloured tag. */
+.gym-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--surface3, rgba(255,255,255,0.06));
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.gym-chip:hover { border-color: var(--accent); }
+.gym-chip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.gym-chip__name { letter-spacing: 0.2px; }
+.gym-chip__chev { font-size: 10px; opacity: 0.7; }
+.gym-chip--placeholder { color: var(--text-muted); border-style: dashed; }
+.gym-chip--readonly { cursor: default; }
+.gym-chip--readonly:hover { border-color: var(--border); }
+.start-modal-gym {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0 4px;
+}
 
 /* Workout-screen header gear button + dropdown menu */
 .workout-header-menu-wrap { position: relative; }

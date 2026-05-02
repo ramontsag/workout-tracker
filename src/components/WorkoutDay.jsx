@@ -6,7 +6,9 @@ import {
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
   insertCompletedSession, updateCompletedSession,
   getTemplates, getLastSetsByExercise,
+  getGyms, createGym, updateGym, deleteGym, setActiveGym,
 } from '../supabase'
+import GymPickerSheet from './GymPickerSheet'
 import {
   displayWeight, parseInputWeight, unitLabel, kgToInputValue,
   displayDistance, parseInputDistance, distanceUnitLabel,
@@ -787,6 +789,48 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   // prevents two workouts from running at once.
   const [activeBlockedBy, setActiveBlockedBy] = useState(null) // { dayName, blockName, dayId, blockId } | null
 
+  // ── Gym tags ────────────────────────────────────────────
+  // The user's gyms + the currently active one. Captured at Start time and
+  // stamped onto the workout so a mid-workout gym switch doesn't retroactively
+  // change history. Updated lazily — defaults to whatever is on profile.
+  const [gyms, setGyms]                     = useState([])
+  const [activeGymId, setActiveGymId]       = useState(profile?.active_gym_id || null)
+  const [gymPickerOpen, setGymPickerOpen]   = useState(false)
+  // The gym to stamp on this workout — frozen when the user taps Start so
+  // a switch mid-workout doesn't retag the in-progress session.
+  const [stampedGymId, setStampedGymId]     = useState(null)
+  useEffect(() => {
+    if (!userId) return
+    getGyms(userId).then(setGyms).catch(() => {})
+  }, [userId])
+  // Reflect a freshly-loaded profile (initial mount races the gym fetch).
+  useEffect(() => {
+    if (profile?.active_gym_id !== undefined) setActiveGymId(profile.active_gym_id || null)
+  }, [profile?.active_gym_id])
+  const activeGym = activeGymId ? gyms.find(g => g.id === activeGymId) : null
+
+  const handlePickGym = async (gymId) => {
+    setActiveGymId(gymId)
+    if (userId) {
+      try { await setActiveGym(gymId, userId) } catch (e) { console.warn('[gym] set active failed', e.message) }
+    }
+  }
+  const handleCreateGym = async (name) => {
+    const created = await createGym(name, userId)
+    setGyms(prev => [...prev, created])
+    setActiveGymId(created.id)
+    return created
+  }
+  const handleRenameGym = async (id, name) => {
+    const updated = await updateGym(id, { name }, userId)
+    setGyms(prev => prev.map(g => g.id === id ? { ...g, ...updated } : g))
+  }
+  const handleDeleteGym = async (id) => {
+    await deleteGym(id, userId)
+    setGyms(prev => prev.filter(g => g.id !== id))
+    if (activeGymId === id) setActiveGymId(null)
+  }
+
   // Whether a template already exists for this block — controls the
   // visibility of the "Save as template…" menu item so the user can't keep
   // re-saving the same workout.
@@ -1470,6 +1514,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         dayLabel,
         kind:           'workout',
         workoutBlockId: blockId,
+        // Prefer the gym frozen at Start time. Fall back to the current
+        // active gym for paths that skipped Start (resumed drafts, edits).
+        gymId:          stampedGymId ?? activeGymId,
         exerciseSets:   setsForSave,
         trackModeMap,
       }, userId)
@@ -1869,6 +1916,23 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
               <p className="modal-body">
                 Tap Start to begin — we'll track the workout duration until you complete it.
               </p>
+              {/* Gym chip — non-blocking. Tap to switch / add a gym. The
+                  selection auto-stamps onto every future workout until
+                  changed. Activities don't get a gym tag. */}
+              <div className="start-modal-gym">
+                <button
+                  type="button"
+                  className={`gym-chip${activeGym ? '' : ' gym-chip--placeholder'}`}
+                  onClick={() => setGymPickerOpen(true)}
+                  title="Set workout location"
+                >
+                  <span className="gym-chip__dot" style={{ background: activeGym?.color || '#52525b' }} />
+                  <span className="gym-chip__name">
+                    {activeGym ? activeGym.name : '+ Set gym'}
+                  </span>
+                  <span className="gym-chip__chev">▾</span>
+                </button>
+              </div>
               <div className="modal-actions modal-actions--stack">
                 <button
                   className="modal-btn-primary"
@@ -1885,6 +1949,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                     const startedAt = new Date().toISOString()
                     setWorkoutStartedAt(startedAt)
                     setNeedsStart(false)
+                    // Freeze the gym at Start time so swapping gyms mid-workout
+                    // doesn't retag the session.
+                    setStampedGymId(activeGymId)
                     startActiveWorkout({
                       dayId: day.id, blockId, dayName: day.name, blockName,
                       startedAt,
@@ -2040,6 +2107,17 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           onSaved={onProgramUpdated}
         />
       )}
+
+      <GymPickerSheet
+        open={gymPickerOpen}
+        gyms={gyms}
+        activeGymId={activeGymId}
+        onClose={() => setGymPickerOpen(false)}
+        onPick={handlePickGym}
+        onCreate={handleCreateGym}
+        onRename={handleRenameGym}
+        onDelete={handleDeleteGym}
+      />
 
       <RestPickerSheet
         open={restPickerOpen}
