@@ -143,7 +143,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     setDraft(prev => ({
       ...prev,
       exercises: [...prev.exercises, {
-        name, target: '', item_type: 'exercise', track_mode: 'sets', set_count: null,
+        name, target: '', item_type: 'exercise', track_mode: 'sets', set_count: 2,
         workout_block_id: blockId || null,
       }],
     }))
@@ -166,13 +166,13 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
         return {
           ...it,
           track_mode: becomingCheck ? 'check' : 'sets',
-          set_count:  becomingCheck ? (it.set_count ?? 1) : null,
+          set_count:  it.set_count ?? (becomingCheck ? 1 : 2),
         }
       }),
     }))
 
   const setSetCount = (idx, n) =>
-    updateItem(idx, { set_count: Math.max(1, Math.min(10, n)) })
+    updateItem(idx, { set_count: Math.max(1, Math.min(15, n)) })
 
   const toggleDropSets = (idx) =>
     setDraft(prev => ({
@@ -372,19 +372,23 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                   {!isActivity && !isCheck && (
                     <input
                       className="ex-target-input"
-                      placeholder="Target (e.g. 3 sets of 8-10 reps)"
+                      placeholder="Target (e.g. 8-10 reps)"
                       value={it.target || ''}
                       onChange={e => updateItem(i, { target: e.target.value })}
                     />
                   )}
-                  {!isActivity && isCheck && (
-                    <div className="set-count-row">
-                      <span className="set-count-label">Sets</span>
-                      <button type="button" className="set-count-btn" onClick={() => setSetCount(i, (it.set_count ?? 1) - 1)}>−</button>
-                      <span className="set-count-value">{it.set_count ?? 1}</span>
-                      <button type="button" className="set-count-btn" onClick={() => setSetCount(i, (it.set_count ?? 1) + 1)}>+</button>
-                    </div>
-                  )}
+                  {!isActivity && (() => {
+                    const fallback = isCheck ? 1 : 2
+                    const value = it.set_count ?? fallback
+                    return (
+                      <div className="set-count-row">
+                        <span className="set-count-label">Sets</span>
+                        <button type="button" className="set-count-btn" onClick={() => setSetCount(i, value - 1)} disabled={value <= 1}>−</button>
+                        <span className="set-count-value">{value}</span>
+                        <button type="button" className="set-count-btn" onClick={() => setSetCount(i, value + 1)} disabled={value >= 15}>+</button>
+                      </div>
+                    )
+                  })()}
                   {isActivity && (
                     <div className="activity-fields-picker">
                       {FIELD_CATALOG.map(f => {
@@ -586,7 +590,44 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
         dayId={day?.id}
         userId={userId}
         onClose={() => setBuilderOpen(false)}
-        onCreated={() => { onSaved?.() }}
+        onCreated={(block) => {
+          // Append the new block to the local draft so it shows up instantly.
+          // The DB write already happened inside WorkoutBuilderModal — we
+          // intentionally don't trigger onSaved here because that refetches
+          // `day` from above and would clobber any in-modal edits the user
+          // makes next. Save Changes is what syncs the parent.
+          //
+          // CRITICAL: when the block was seeded from a template, the seeded
+          // exercise rows must also land in draft.exercises. saveProgram
+          // deletes-then-reinserts based on draft.exercises, so anything not
+          // mirrored here would be wiped on Save.
+          if (block?.id) {
+            const seeded = (block.seededExercises || []).map(e => ({
+              id:               e.id,
+              name:             e.name,
+              target:           e.target || '',
+              item_type:        e.item_type || 'exercise',
+              track_mode:       e.track_mode || 'sets',
+              set_count:        e.set_count ?? 2,
+              activity_fields:  Array.isArray(e.activity_fields) ? e.activity_fields : null,
+              superset_group:   e.superset_group || null,
+              workout_block_id: block.id,
+              has_drop_sets:    !!e.has_drop_sets,
+            }))
+            setDraft(prev => ({
+              ...prev,
+              exercises: [...(prev.exercises || []), ...seeded],
+              workout_blocks: [...(prev.workout_blocks || []), {
+                id:            block.id,
+                name:          block.name,
+                sort_order:    block.sort_order,
+                rest_seconds:  block.rest_seconds ?? 90,
+                timer_enabled: block.timer_enabled ?? true,
+                exercises:     seeded,
+              }],
+            }))
+          }
+        }}
       />
 
       {infoOpen && (

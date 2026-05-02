@@ -1088,14 +1088,14 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   transition: background 0.15s, color 0.15s;
 }
 .item-track-pill--track {
-  background: rgba(0, 194, 168, 0.10);
+  background: rgba(0, 194, 168, 0.22);
   color: #00C2A8;
-  border-color: rgba(0, 194, 168, 0.22);
+  border-color: rgba(0, 194, 168, 0.55);
 }
 .item-track-pill--check {
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(99, 102, 241, 0.22);
   color: #a5b4fc;
-  border-color: rgba(99, 102, 241, 0.28);
+  border-color: rgba(99, 102, 241, 0.55);
 }
 .item-track-pill:active { opacity: 0.7; }
 
@@ -3073,7 +3073,7 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .picker-sheet {
   width: 100%;
   max-width: 480px;
-  max-height: 88vh;
+  height: 88vh;
   background: var(--surface);
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;
@@ -3397,6 +3397,22 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 .rest-timer-flag--off { color: var(--text-muted); }
 
+/* Workout-duration pill — shown in the controls row once Started. */
+.workout-duration-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: rgba(255, 85, 0, 0.10);
+  border: 1px solid rgba(255, 85, 0, 0.30);
+  margin-left: auto;
+}
+
 /* Rest picker bottom sheet */
 .rest-picker-sheet { max-height: 70vh; }
 .rest-picker-list {
@@ -3466,6 +3482,8 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   cursor: pointer;
 }
 .workout-menu-item:hover { background: var(--surface2); }
+.workout-menu-item--danger { color: var(--danger, #ef4444); }
+.workout-menu-item--danger:hover { background: rgba(239, 68, 68, 0.10); }
 
 /* Mid-workout add row (Add exercise / Add activity) */
 .workout-add-row { display: flex; gap: 8px; margin-top: 12px; }
@@ -3808,154 +3826,6 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   cursor: pointer;
 }
 .makeup-sheet__discard:active { background: rgba(239, 68, 68, 0.1); }
-
-/* ── Simplified UI: collapsed exercise card ────────── */
-.ex-card--collapsed {
-  padding: 0;
-  background: var(--surface2);
-  border-color: var(--border-subtle);
-}
-.ex-collapsed-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  background: none;
-  border: none;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.ex-collapsed-row:active { background: var(--surface3); }
-.ex-collapsed-tick {
-  color: var(--success, #22c55e);
-  font-size: 14px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-.ex-collapsed-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  flex-shrink: 0;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ex-collapsed-summary {
-  flex: 1;
-  font-size: 12px;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ex-collapsed-chev {
-  font-size: 14px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-/* Manual collapse chevron in expanded card header */
-.ex-collapse-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 14px;
-  padding: 4px 6px;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  flex-shrink: 0;
-}
-.ex-collapse-btn:active { color: var(--text); }
-
-/* ── Simplified UI: rest pill off-tag + auto-start row ── */
-.rest-picker-trigger--off { opacity: 0.7; }
-.rest-picker-trigger-off-tag {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  background: var(--surface2);
-  padding: 2px 5px;
-  border-radius: 4px;
-}
-.rest-picker-footer {
-  border-top: 1px solid var(--border-subtle);
-  padding: 12px 16px 16px;
-}
-.rest-picker-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text);
-  -webkit-tap-highlight-color: transparent;
-}
-.rest-picker-toggle input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  accent-color: var(--accent, #ff5500);
-  cursor: pointer;
-}
-
-/* ── Simplified UI: resume toast (replaces modal) ────── */
-.resume-toast {
-  position: fixed;
-  top: 12px;
-  left: 12px;
-  right: 12px;
-  z-index: 90;
-  background: var(--surface3, #1f2937);
-  border: 1px solid var(--accent, #ff5500);
-  border-radius: 10px;
-  padding: 10px 12px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.resume-toast__text {
-  flex: 1;
-  font-size: 13px;
-  color: var(--text);
-  font-weight: 600;
-}
-.resume-toast__actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.resume-toast__resume {
-  background: var(--accent, #ff5500);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.resume-toast__resume:active { opacity: 0.85; }
-.resume-toast__discard {
-  background: transparent;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.resume-toast__discard:active { background: var(--surface2); }
 
 /* ── Edit-completed banner button ─────────────────────── */
 .workout-done-banner {

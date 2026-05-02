@@ -237,9 +237,8 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
             <div className="weight-bar-form-row">
               <input
                 className="field-input weight-bar-input"
-                type="number"
+                type="text"
                 inputMode="decimal"
-                step="0.1"
                 placeholder={label}
                 value={weightInput}
                 onChange={e => { setWeightInput(e.target.value); setError('') }}

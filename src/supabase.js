@@ -188,17 +188,25 @@ export async function getProgram() {
   const trainingDays = (trainingResult.data || []).map(day => {
     const allExercises = (day.exercises || [])
       .sort((a, b) => a.sort_order - b.sort_order)
-      .map(e => ({
-        id:               e.id,
-        name:             e.name,
-        target:           e.target || '',
-        item_type:        e.item_type || 'exercise',
-        track_mode:       e.track_mode || 'sets',
-        set_count:        e.set_count ?? null,
-        activity_fields:  Array.isArray(e.activity_fields) ? e.activity_fields : null,
-        superset_group:   e.superset_group || null,
-        workout_block_id: e.workout_block_id || null,
-      }))
+      .map(e => {
+        const isActivity = (e.item_type || 'exercise') === 'activity'
+        const trackMode = e.track_mode || 'sets'
+        const setCount = e.set_count != null
+          ? e.set_count
+          : (isActivity ? null : (trackMode === 'check' ? 1 : 2))
+        return {
+          id:               e.id,
+          name:             e.name,
+          target:           e.target || '',
+          item_type:        e.item_type || 'exercise',
+          track_mode:       trackMode,
+          set_count:        setCount,
+          activity_fields:  Array.isArray(e.activity_fields) ? e.activity_fields : null,
+          superset_group:   e.superset_group || null,
+          workout_block_id: e.workout_block_id || null,
+          has_drop_sets:    !!e.has_drop_sets,
+        }
+      })
 
     // Group the exercise items into named workout blocks. Activities are
     // never in a block. If an exercise has no block_id (legacy or pre-backfill
@@ -360,7 +368,9 @@ export async function saveProgram(days, uid) {
         target:           ex.target || '',
         item_type:        ex.item_type || 'exercise',
         track_mode:       ex.item_type === 'exercise' ? (ex.track_mode || 'sets') : 'sets',
-        set_count:        ex.track_mode === 'check' ? (ex.set_count ?? 1) : null,
+        set_count:        ex.item_type === 'exercise'
+          ? (ex.set_count ?? (ex.track_mode === 'check' ? 1 : 2))
+          : null,
         sort_order:       j,
         activity_fields:  ex.item_type === 'activity' && Array.isArray(ex.activity_fields)
           ? ex.activity_fields
@@ -799,6 +809,10 @@ export async function addExerciseToProgram(trainingDayId, payload, uid) {
         : null,
       superset_group:   !isActivity ? (payload.superset_group || null) : null,
       workout_block_id: !isActivity ? (payload.workout_block_id || null) : null,
+      track_mode:       !isActivity ? (payload.track_mode || 'sets') : 'sets',
+      set_count:        !isActivity
+        ? (payload.set_count ?? (payload.track_mode === 'check' ? 1 : 2))
+        : null,
     }),
     5000, 'Add exercise to program'
   )
@@ -834,6 +848,10 @@ export async function createWorkoutBlock(trainingDayId, name, uid, opts = {}) {
   if (error) throw new Error(`Create block failed: ${error.message}`)
 
   // Optional: seed exercises from a template's saved exercises.
+  // Returns the inserted rows alongside the block so callers (EditDayModal)
+  // can mirror them into local state — without this, the modal's optimistic
+  // update has no exercises and the next saveProgram would delete them.
+  let seededExercises = []
   if (opts.fromTemplateId) {
     try {
       const { data: tex } = await withTimeout(
@@ -852,13 +870,17 @@ export async function createWorkoutBlock(trainingDayId, name, uid, opts = {}) {
             name:             e.exercise_name,
             target:           e.target || '',
             item_type:        'exercise',
+            track_mode:       'sets',
+            set_count:        2,
             sort_order:       i,
           }))
         if (exRows.length) {
-          await withTimeout(
-            supabase.from('exercises').insert(exRows),
+          const { data: inserted, error: seedErr } = await withTimeout(
+            supabase.from('exercises').insert(exRows).select(),
             5000, 'Seed block from template'
           )
+          if (seedErr) throw seedErr
+          seededExercises = inserted || []
         }
       }
     } catch (e) {
@@ -867,7 +889,7 @@ export async function createWorkoutBlock(trainingDayId, name, uid, opts = {}) {
     }
   }
 
-  return data
+  return { ...data, seededExercises }
 }
 
 export async function updateWorkoutBlock(blockId, fields, uid) {

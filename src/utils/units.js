@@ -19,7 +19,8 @@ export function displayWeight(kg, unit) {
 
 // Parse a raw input string in the user's unit and return kg (number or NaN).
 export function parseInputWeight(raw, unit) {
-  const n = parseFloat(raw)
+  // Accept comma as the decimal separator too (European keyboards).
+  const n = parseFloat(typeof raw === 'string' ? raw.replace(',', '.') : raw)
   if (isNaN(n)) return NaN
   return unit === 'lbs' ? lbsToKg(n) : n
 }
@@ -67,7 +68,7 @@ export function displayElevation(m, unit) {
 }
 
 export function parseInputElevation(raw, unit) {
-  const n = parseFloat(raw)
+  const n = parseFloat(typeof raw === 'string' ? raw.replace(',', '.') : raw)
   if (isNaN(n)) return NaN
   return unit === 'lbs' ? feetToMeters(n) : n
 }
@@ -88,7 +89,7 @@ export function displayLength(cm, unit) {
 }
 
 export function parseInputLength(raw, unit) {
-  const n = parseFloat(raw)
+  const n = parseFloat(typeof raw === 'string' ? raw.replace(',', '.') : raw)
   if (isNaN(n)) return NaN
   return unit === 'lbs' ? inchesToCm(n) : n
 }

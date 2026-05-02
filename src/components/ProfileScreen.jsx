@@ -220,9 +220,8 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
                   <label className="measure-row__label">{f.label}</label>
                   <input
                     className="field-input measure-input"
-                    type="number"
+                    type="text"
                     inputMode="decimal"
-                    step="0.1"
                     placeholder={lengthUnitLabel(unit)}
                     value={measureInputs[f.key] ?? ''}
                     onChange={e => {
@@ -240,9 +239,8 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
                   <span className="measure-row__side">L</span>
                   <input
                     className="field-input measure-input"
-                    type="number"
+                    type="text"
                     inputMode="decimal"
-                    step="0.1"
                     placeholder={lengthUnitLabel(unit)}
                     value={measureInputs[f.keyL] ?? ''}
                     onChange={e => {
@@ -254,9 +252,8 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
                   <span className="measure-row__side">R</span>
                   <input
                     className="field-input measure-input"
-                    type="number"
+                    type="text"
                     inputMode="decimal"
-                    step="0.1"
                     placeholder={lengthUnitLabel(unit)}
                     value={measureInputs[f.keyR] ?? ''}
                     onChange={e => {
