@@ -11,6 +11,7 @@ import ArchivesScreen  from './components/ArchivesScreen'
 import SettingsScreen  from './components/SettingsScreen'
 import FloatingTimer   from './components/FloatingTimer'
 import { stop as stopRestTimer } from './restTimerStore'
+import { clear as clearActiveWorkout } from './activeWorkoutStore'
 
 // Screens: loading → auth → home
 //          home → workout → history → workout
@@ -98,6 +99,10 @@ export default function App() {
 
         } else if (event === 'SIGNED_OUT') {
           setUser(null); setProgram([]); setActiveDay(null); setTotalWorkouts(null); setTotalActivities(null); setProfile(null)
+          // Tear down floating-pill state so the next user doesn't inherit
+          // the previous account's in-progress workout / rest timer.
+          stopRestTimer()
+          clearActiveWorkout()
           go('auth')
         }
       }

@@ -934,6 +934,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         startedAt: draft.started_at,
       })
     }
+    // Adopt the draft's original gym. Without this, completing a resumed
+    // workout would re-stamp it with whatever gym is active *now* — possibly
+    // overwriting the gym the user actually trained at when they started.
+    if (draft.gym_id !== undefined) setStampedGymId(draft.gym_id || null)
     setNeedsStart(false)
   }
 
@@ -1158,6 +1162,11 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         trainingDayId:  day.id,
         workoutBlockId: blockId,
         dayLabel,
+        // Stamp the gym at draft-creation time. A new draft uses the gym that
+        // was frozen at Start (or the current active one for autosaves that
+        // race ahead of Start). Existing drafts ignore this field — gym is
+        // pinned at creation, never overwritten by later autosaves.
+        gymId:          stampedGymId ?? activeGymId,
         draftState:     { sets: s, activityLogs: a, exerciseList: el },
       }, userId)
       if (!workoutIdRef.current && result?.id) {

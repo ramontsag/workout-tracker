@@ -534,7 +534,7 @@ export async function getInProgressWorkout(trainingDayId, blockId, uid) {
   if (!uid) throw new Error('Not authenticated')
   let q = supabase
     .from('workouts')
-    .select('id, day_name, started_at, updated_at, draft_state, workout_block_id')
+    .select('id, day_name, started_at, updated_at, draft_state, workout_block_id, gym_id')
     .eq('user_id', uid)
     .eq('training_day_id', trainingDayId)
     .eq('status', 'in_progress')
