@@ -859,6 +859,57 @@ a { color: inherit; text-decoration: none; }
 .complete-btn:disabled { opacity: 0.6; }
 .complete-btn--saved { background: var(--success); color: #fff; }
 
+/* Prominent inline "Save as template" CTA. Sits above the Complete Workout
+   button so users can save the structure of a workout they're loving even
+   before they finish logging it. Styled as an eye-catching outlined card
+   so it reads as primary-secondary, never competes with the main Complete
+   button. */
+.save-template-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(255,85,0,0.12), rgba(255,85,0,0.04));
+  border: 1.5px solid rgba(255, 85, 0, 0.55);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+  box-shadow: 0 0 0 0 rgba(255, 85, 0, 0.0);
+}
+.save-template-cta:active { transform: scale(0.98); }
+.save-template-cta:hover {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(255,85,0,0.18), rgba(255,85,0,0.06));
+  box-shadow: 0 4px 14px rgba(255, 85, 0, 0.18);
+}
+.save-template-cta__icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px rgba(255, 85, 0, 0.35));
+}
+.save-template-cta__text {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.save-template-cta__hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
 .err-msg {
   margin-top: 12px;
   font-size: 13px;

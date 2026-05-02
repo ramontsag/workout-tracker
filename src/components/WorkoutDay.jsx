@@ -1819,6 +1819,26 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
 
         {errMsg && <p className="err-msg">{errMsg}</p>}
 
+        {/* Prominent "Save as template" CTA — promoted out of the gear menu
+            so users actually discover it. Only shown when:
+              - there's at least one exercise to save
+              - we're not currently editing a previously-completed workout
+              - a template for this block doesn't already exist
+              - the user hasn't already opened the naming form
+            Tapping opens the same naming form the menu item used. */}
+        {exerciseItems.length > 0 && !editingCompleted && !templateExistsForBlock && archiveStep !== 'naming' && (
+          <button
+            type="button"
+            className="save-template-cta"
+            onClick={handleArchiveTrigger}
+            title="Save this workout's structure as a reusable template"
+          >
+            <span className="save-template-cta__icon" aria-hidden="true">⭐</span>
+            <span className="save-template-cta__text">Save as template</span>
+            <span className="save-template-cta__hint">Reuse the structure on any day</span>
+          </button>
+        )}
+
         {/* Bottom button only completes the gym block. Activities each have
             their own Mark-done button. Hidden once the workout is done.
             In edit-completed mode, label changes and the handler routes to
