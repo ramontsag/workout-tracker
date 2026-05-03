@@ -859,6 +859,13 @@ a { color: inherit; text-decoration: none; }
 .complete-btn:disabled { opacity: 0.6; }
 .complete-btn--saved { background: var(--success); color: #fff; }
 
+/* Tail of the workout content — adds enough margin under the primary CTA so
+   the button never visually sits flush with the bottom of the screen. iOS
+   home-indicator / bottom safe area is honoured on top of this. */
+.workout-bottom-spacer {
+  height: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+
 /* Prominent inline "Save as template" CTA. Sits above the Complete Workout
    button so users can save the structure of a workout they're loving even
    before they finish logging it. Styled as an eye-catching outlined card
@@ -3524,12 +3531,19 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .rest-picker-item--on { color: var(--accent, #ff5500); font-weight: 700; }
 .rest-picker-check { color: var(--accent, #ff5500); }
 
-/* ── Gym picker sheet (Start workout modal) ───────────────── */
-.gym-picker-sheet { max-height: 80vh; }
+/* ── Gym picker sheet (Start workout modal) ─────────────────
+   Auto-height — the sheet only takes the space it needs. Grows as the
+   user adds more gyms; never forces a giant 88vh empty surface for a
+   list of two items. */
+.gym-picker-sheet {
+  height: auto;
+  max-height: 70vh;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
 .gym-picker-list {
-  flex: 1;
+  flex: 0 1 auto;
   overflow-y: auto;
-  padding: 8px 12px 16px;
+  padding: 12px 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3539,20 +3553,31 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   text-align: left;
   background: var(--surface2, #161b22);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 12px 14px;
+  padding: 9px 12px;
   border-radius: 10px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 .gym-picker-item:active { background: var(--surface3); }
 .gym-picker-item--on { border-color: var(--accent); }
+/* "No gym" row reads as a quiet alternative — smaller, dimmer, doesn't
+   dominate the sheet like a full-size primary option. */
+.gym-picker-item--none {
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border-style: dashed;
+}
+.gym-picker-item--none .gym-picker-dot { width: 10px; height: 10px; }
 .gym-picker-dot {
   width: 14px;
   height: 14px;
@@ -3564,14 +3589,14 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .gym-picker-check { color: var(--accent); font-weight: 800; }
 .gym-picker-edit-btn,
 .gym-picker-delete-btn {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 8px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 14px;
   flex-shrink: 0;
 }
 .gym-picker-delete-btn:hover { color: #ef4444; border-color: #ef4444; }
@@ -3580,7 +3605,7 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px;
+  padding: 6px;
   border: 1px dashed var(--border);
   border-radius: 10px;
 }
@@ -3590,30 +3615,35 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 8px;
   cursor: pointer;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
 }
 .gym-picker-save { color: var(--accent); border-color: var(--accent); }
+/* Centered Add-gym CTA. Sits below the list, breathing room around it. */
 .gym-picker-add {
+  align-self: center;
+  margin-top: 6px;
   background: transparent;
-  border: 1px dashed var(--border);
-  color: var(--text-muted);
-  padding: 12px;
-  border-radius: 10px;
-  font-size: 13px;
+  border: 1px dashed var(--accent, #ff5500);
+  color: var(--accent, #ff5500);
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
   cursor: pointer;
+  min-width: 160px;
 }
-.gym-picker-add:hover { color: var(--accent); border-color: var(--accent); }
+.gym-picker-add:hover { background: rgba(255, 85, 0, 0.08); }
 .gym-picker-error {
   padding: 0 16px 12px;
   color: #ef4444;
   font-size: 13px;
+  text-align: center;
 }
 
 /* Inline gym chip — used on the Start-workout modal and (optionally) on
@@ -3648,6 +3678,38 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   justify-content: center;
   margin: 12px 0 4px;
 }
+
+/* Subtle Save-as-template pill in the workout header (next to gear).
+   Stays muted by default; pulses to the accent on hover/active so the
+   user notices without it screaming for attention. */
+.header-template-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  margin-right: 4px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+.header-template-pill:hover,
+.header-template-pill:active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(255, 85, 0, 0.08);
+}
+.header-template-pill:active { transform: scale(0.97); }
+.header-template-pill__icon { font-size: 12px; line-height: 1; }
+.header-template-pill__text { line-height: 1; }
 
 /* Workout-screen header gear button + dropdown menu */
 .workout-header-menu-wrap { position: relative; }

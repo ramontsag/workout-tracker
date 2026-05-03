@@ -201,6 +201,7 @@ export default function App() {
           onCompleteHome={() => { setActiveDay(null); setActiveBlock(null); go('home') }}
           onHistory={exercise => { setActiveExercise(exercise); go('history') }}
           onProgramUpdated={refreshProgram}
+          onProfileUpdated={setProfile}
         />
       )
     }

@@ -83,10 +83,11 @@ export default function GymPickerSheet({
         </div>
 
         <div className="gym-picker-list">
-          {/* "No gym" option — useful for travel days or when the user just
-              doesn't want a tag stamped on this workout. */}
+          {/* "No gym" option — quiet styling so it doesn't dominate the
+              sheet. Useful for travel days or when the user just doesn't
+              want a tag stamped on this workout. */}
           <button
-            className={`gym-picker-item${activeGymId == null ? ' gym-picker-item--on' : ''}`}
+            className={`gym-picker-item gym-picker-item--none${activeGymId == null ? ' gym-picker-item--on' : ''}`}
             onClick={() => { onPick(null); onClose() }}
           >
             <span className="gym-picker-dot" style={{ background: '#52525b' }} />

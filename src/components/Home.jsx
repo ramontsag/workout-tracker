@@ -356,6 +356,12 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                   {countLabel && <div className="day-card__count">{countLabel}</div>}
                 </div>
                 <div className="day-card__indicator-wrap">
+                  {showBadge && (
+                    <span
+                      className="day-card__progress-badge"
+                      title={`${doneItems} of ${totalItems} items done this week`}
+                    >{doneItems}/{totalItems}</span>
+                  )}
                   <div className={`day-card__indicator-circle day-card__indicator-circle--${indicatorType}${isDone ? ' day-card__indicator-circle--done' : ''}`}
                     title={isDone ? `Completed ${doneItems}/${totalItems} this week` : undefined}
                     aria-label={isDone ? 'Completed' : undefined}
@@ -364,12 +370,6 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                       ? <span className="day-card__indicator-check">✓</span>
                       : <div className="day-card__indicator-dash" />}
                   </div>
-                  {showBadge && (
-                    <span
-                      className="day-card__progress-badge"
-                      title={`${doneItems} of ${totalItems} items done this week`}
-                    >{doneItems}/{totalItems}</span>
-                  )}
                 </div>
               </div>
             )

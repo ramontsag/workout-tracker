@@ -657,7 +657,7 @@ function CheckCard({ exercise, sets, onToggleCheck, onHistory, onRemoveExercise 
 // ── Main component ────────────────────────────────────────────
 // `block` is the workout_blocks row we're scoping to. If null/undefined
 // (legacy callers), we fall back to "all exercises in the day".
-export default function WorkoutDay({ day, program, userId, profile, onBack, onHistory, onProgramUpdated, onCompleteHome, block, editingCompletedId = null }) {
+export default function WorkoutDay({ day, program, userId, profile, onBack, onHistory, onProgramUpdated, onProfileUpdated, onCompleteHome, block, editingCompletedId = null }) {
   const unit          = profile?.weight_unit    || 'kg'
   const intensityMode = profile?.intensity_mode || 'off'
   const editingMode   = !!editingCompletedId
@@ -811,6 +811,13 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
 
   const handlePickGym = async (gymId) => {
     setActiveGymId(gymId)
+    // Also push the new active gym up to App-level profile state, so when
+    // the user navigates to a different day, that day's WorkoutDay reads
+    // the fresh gym from props (otherwise it'd see stale data from the
+    // last profile fetch).
+    if (onProfileUpdated && profile) {
+      onProfileUpdated({ ...profile, active_gym_id: gymId })
+    }
     if (userId) {
       try { await setActiveGym(gymId, userId) } catch (e) { console.warn('[gym] set active failed', e.message) }
     }
@@ -828,7 +835,14 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   const handleDeleteGym = async (id) => {
     await deleteGym(id, userId)
     setGyms(prev => prev.filter(g => g.id !== id))
-    if (activeGymId === id) setActiveGymId(null)
+    if (activeGymId === id) {
+      setActiveGymId(null)
+      // Mirror to App-level profile so other screens don't keep showing the
+      // deleted gym as active.
+      if (onProfileUpdated && profile) {
+        onProfileUpdated({ ...profile, active_gym_id: null })
+      }
+    }
   }
 
   // Whether a template already exists for this block — controls the
@@ -1665,6 +1679,20 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
             </div>
             <div className="workout-header__date">{todayLabel}</div>
           </div>
+          {/* Subtle "Save as template" pill — only shown while a template
+              for this block hasn't been saved yet. Quiet styling so it
+              encourages without competing with primary actions. */}
+          {!templateExistsForBlock && exerciseItems.length > 0 && archiveStep !== 'naming' && (
+            <button
+              type="button"
+              className="header-template-pill"
+              onClick={handleArchiveTrigger}
+              title="Save this workout's structure as a reusable template"
+            >
+              <span className="header-template-pill__icon" aria-hidden="true">⭐</span>
+              <span className="header-template-pill__text">Template</span>
+            </button>
+          )}
           <div className="workout-header-menu-wrap">
             <button
               className="workout-gear-btn"
@@ -1924,7 +1952,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           </div>
         )}
 
-        <div style={{ height: 40 }} />
+        {/* Tail spacer — keeps the Complete / Save changes button clear of
+            the device's bottom edge and the iOS home indicator. */}
+        <div className="workout-bottom-spacer" />
       </div>
 
       {/* ── Start workout prompt ──────────────────────────────
