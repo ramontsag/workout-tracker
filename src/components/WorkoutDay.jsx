@@ -6,6 +6,7 @@ import {
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
   insertCompletedSession, updateCompletedSession, completeWorkout,
   getTemplates, getLastSetsByExercise, updateExerciseSetCount,
+  getLastSessionForBlock,
   getGyms, createGym, updateGym, deleteGym, setActiveGym,
 } from '../supabase'
 import GymPickerSheet from './GymPickerSheet'
@@ -794,6 +795,46 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   const restSeconds = block?.rest_seconds ?? day.rest_seconds ?? 90
   const restTimer = useRestTimer()
 
+  // Convert typed-but-unsaved values when the user flips kg ↔ lb mid-workout.
+  // Without this, a typed "60" (kg) silently becomes 60 lb on save (audit H1).
+  // We only rewrite values that actually parse as a number, leaving empty
+  // inputs and free-form notes alone.
+  const prevUnitRef = useRef(unit)
+  useEffect(() => {
+    const oldUnit = prevUnitRef.current
+    if (oldUnit === unit) return
+    prevUnitRef.current = unit
+    setSets(curr => {
+      const out = {}
+      for (const [name, arr] of Object.entries(curr || {})) {
+        out[name] = (arr || []).map(s => {
+          if (!s || s.weight === '' || s.weight == null) return s
+          const kg = parseInputWeight(s.weight, oldUnit)
+          if (isNaN(kg)) return s
+          return { ...s, weight: displayWeight(kg, unit), weight_autofill: false }
+        })
+      }
+      return out
+    })
+    setActivityLogs(currLogs => {
+      const out = {}
+      for (const [name, log] of Object.entries(currLogs || {})) {
+        const next = { ...log }
+        if (next.distance_display !== '' && next.distance_display != null) {
+          const km = parseInputDistance(next.distance_display, oldUnit)
+          if (!isNaN(km)) next.distance_display = displayDistance(km, unit)
+        }
+        if (next.elevation_display !== '' && next.elevation_display != null) {
+          const m = parseInputElevation(next.elevation_display, oldUnit)
+          if (!isNaN(m)) next.elevation_display = displayElevation(m, unit)
+        }
+        out[name] = next
+      }
+      return out
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unit])
+
   // save-workout state
   const [archiveStep,  setArchiveStep]  = useState(null)  // null | 'naming' | 'saving' | 'done' | 'limit'
   const [archiveName,  setArchiveName]  = useState('')
@@ -901,6 +942,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   // visibility of the "Save as template…" menu item so the user can't keep
   // re-saving the same workout.
   const [templateExistsForBlock, setTemplateExistsForBlock] = useState(false)
+  // Most recent completed session for THIS block — drives the "History" pill
+  // that lets the user re-open the last workout in edit mode (template-backed
+  // blocks only). Null until loaded or if there's no prior session.
+  const [previousBlockSession, setPreviousBlockSession] = useState(null)
   useEffect(() => {
     if (!userId) return
     let cancelled = false
@@ -918,6 +963,15 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   useEffect(() => {
     getLastSession(day.id).then(setLastSession).catch(() => {})
   }, [day.id])
+
+  useEffect(() => {
+    if (!blockId) { setPreviousBlockSession(null); return }
+    let cancelled = false
+    getLastSessionForBlock(day.id, blockId)
+      .then(s => { if (!cancelled) setPreviousBlockSession(s) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [day.id, blockId, workoutDoneAt])
 
   // Tick the duration display every second while a workout is running and
   // not yet completed.
@@ -994,11 +1048,20 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     // draft's started_at so the duration counter shows the real elapsed time.
     if (draft.started_at) {
       setWorkoutStartedAt(draft.started_at)
-      // Adopt as the active workout so the floating pill picks it up.
-      startActiveWorkout({
-        dayId: day.id, blockId, dayName: day.name, blockName,
-        startedAt: draft.started_at,
-      })
+      // Adopt as the active workout so the floating pill picks it up — but
+      // only if no other tab/block already holds the active-workout lock.
+      // Without this guard, opening a second draft in another tab would
+      // silently steal the lock from the first (audit H4).
+      const existing = getActiveWorkout()
+      const sameWorkout = existing.active
+        && existing.dayId === day.id
+        && existing.blockId === blockId
+      if (!existing.active || sameWorkout) {
+        startActiveWorkout({
+          dayId: day.id, blockId, dayName: day.name, blockName,
+          startedAt: draft.started_at,
+        })
+      }
     }
     // Adopt the draft's original gym. Without this, completing a resumed
     // workout would re-stamp it with whatever gym is active *now* — possibly
@@ -1216,7 +1279,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   }
 
   const flushDraft = async () => {
-    if (!draftLoaded || !userId) return
+    // Editing a previously-completed workout never autosaves: the row is
+    // 'completed' and we don't want to dirty its draft_state.
+    if (!draftLoaded || !userId || editingCompleted) return
     if (flushPendingRef.current) return
     const { sets: s, activityLogs: a, exerciseList: el } = stateRef.current
     if (!stateHasContent(s, a, el)) return
@@ -1709,6 +1774,48 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     }
   }
 
+  // Open the most recent completed session for THIS block in edit mode so the
+  // user can fix yesterday's typo without losing today's draft. Only the LAST
+  // workout is editable — older history is read-only by design.
+  const handleOpenHistory = () => {
+    if (!previousBlockSession) return
+    const { workout, sets: dbSets } = previousBlockSession
+    if (!workout?.id) return
+    // Group DB rows by exercise name so we can rebuild the cards.
+    const grouped = {}
+    for (const s of (dbSets || [])) {
+      ;(grouped[s.exercise_name] ||= []).push(s)
+    }
+    const next = {}
+    for (const ex of exerciseItems) {
+      const rows = (grouped[ex.name] || []).sort((a, b) => a.set_number - b.set_number)
+      if (!rows.length) {
+        // Exercise was added since that workout — keep an empty card.
+        const n = Math.max(1, ex.set_count ?? 2)
+        next[ex.name] = Array.from({ length: n }, () => makeEmptySet())
+        continue
+      }
+      next[ex.name] = rows.map(s => ({
+        weight:      kgToInputValue(s.weight_kg, unit),
+        reps:        s.reps != null && s.reps !== 0 ? String(s.reps) : '',
+        done:        true,
+        is_warmup:   !!s.is_warmup,
+        is_drop_set: !!s.is_drop_set,
+        rir:         s.rir != null ? String(s.rir) : '',
+        rpe:         s.rpe != null ? String(s.rpe) : '',
+        checked:     !!s.checked,
+      }))
+    }
+    setSets(next)
+    workoutIdRef.current = workout.id
+    setWorkoutId(workout.id)
+    setEditingCompleted(true)
+    setWorkoutDoneAt(null)
+    setStatus('idle')
+    setErrMsg('')
+    setNeedsStart(false)
+  }
+
   const handleArchiveTrigger = () => {
     setArchiveName(blockName && blockName !== 'Workout' ? blockName : day.name)
     setArchiveStep('naming')
@@ -1766,6 +1873,24 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
             </div>
             <div className="workout-header__date">{todayLabel}</div>
           </div>
+          {/* History pill — opens the most recent completed session for THIS
+              block in edit mode. Scoped to template-backed blocks (per the
+              owner's "only template workouts" rule) and only when there is a
+              prior session AND the user isn't mid-completion / mid-edit. */}
+          {templateExistsForBlock
+            && previousBlockSession
+            && !workoutDoneAt
+            && !editingCompleted
+            && exerciseItems.length > 0 && (
+            <button
+              type="button"
+              className="header-history-pill"
+              onClick={handleOpenHistory}
+              title="Open the last completed workout in edit mode"
+            >
+              <span className="header-history-pill__text">History</span>
+            </button>
+          )}
           {/* Subtle "Save as template" pill — only shown while a template
               for this block hasn't been saved yet. Quiet styling so it
               encourages without competing with primary actions. */}

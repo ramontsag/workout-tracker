@@ -521,6 +521,36 @@ export async function getLastSession(trainingDayId) {
   return { workout: sessions[0], sets: sets || [] }
 }
 
+// Most recent completed gym session for a SPECIFIC block — used by the
+// "History" pill so the Edit-last-workout flow always targets this block,
+// even if a sibling block was the last thing the user finished today.
+export async function getLastSessionForBlock(trainingDayId, blockId) {
+  if (!trainingDayId || !blockId) return null
+  const { data: sessions } = await withTimeout(
+    supabase
+      .from('workouts')
+      .select('id, completed_at')
+      .eq('training_day_id', trainingDayId)
+      .eq('workout_block_id', blockId)
+      .eq('status', 'completed')
+      .eq('kind', 'workout')
+      .order('completed_at', { ascending: false })
+      .limit(1),
+    5000, 'Load last block session'
+  )
+  if (!sessions?.length) return null
+
+  const { data: sets } = await withTimeout(
+    supabase
+      .from('workout_sets')
+      .select('*')
+      .eq('workout_id', sessions[0].id)
+      .order('set_number', { ascending: true }),
+    5000, 'Load last block session sets'
+  )
+  return { workout: sessions[0], sets: sets || [] }
+}
+
 // ── Drafts (in-progress workouts) ─────────────────────────────
 //
 // Drafts live as workouts rows with status='in_progress' and the live

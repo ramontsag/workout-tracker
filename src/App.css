@@ -3797,6 +3797,35 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .header-template-pill:active { transform: scale(0.97); }
 .header-template-pill__text { line-height: 1; }
 
+/* "History" pill — same shape as the template pill but a quieter neutral
+   border so the two read as different actions when both could appear. */
+.header-history-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  margin-right: 4px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1.5px solid var(--text-muted);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+.header-history-pill:hover,
+.header-history-pill:active {
+  color: var(--text);
+  border-color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.header-history-pill:active { transform: scale(0.97); }
+.header-history-pill__text { line-height: 1; }
+
 /* Workout-screen header gear button + dropdown menu */
 .workout-header-menu-wrap { position: relative; }
 .workout-gear-btn {

@@ -93,10 +93,10 @@ export const EXERCISE_CATALOG = [
       { name: 'Both heads (general)', items: [
         'Barbell curl', 'EZ-bar curl',
         'Dumbbell curl (standing)', 'Dumbbell curl (seated)',
-        'Cable curl (straight bar)', 'Cable curl (rope)', 'Single-arm cable curl',
+        'Cable curl', 'Single-arm cable curl',
       ] },
       { name: 'Brachialis / brachioradialis', items: [
-        'Hammer curl (dumbbell)', 'Hammer curl (rope)', 'Cross-body hammer curl',
+        'Hammer curl (dumbbell)', 'Hammer curl (cable)', 'Cross-body hammer curl',
         'Reverse curl (barbell)', 'Reverse curl (cable)', 'Zottman curl',
       ] },
     ],
@@ -105,13 +105,11 @@ export const EXERCISE_CATALOG = [
     group: 'Triceps',
     subgroups: [
       { name: 'Long head (overhead)', items: [
-        'Overhead tricep extension (rope)', 'Overhead tricep extension (dumbbell)',
-        'Overhead tricep extension (cable)',
+        'Overhead tricep extension (cable)', 'Overhead tricep extension (dumbbell)',
         'Skull crusher (barbell)', 'Skull crusher (EZ-bar)', 'Skull crusher (dumbbell)',
       ] },
       { name: 'Lateral head (pushdown)', items: [
-        'Tricep pushdown (rope)', 'Tricep pushdown (straight bar)', 'Tricep pushdown (V-bar)',
-        'Single-arm tricep pushdown',
+        'Tricep pushdown', 'Single-arm tricep pushdown',
         'Tricep kickback (dumbbell)', 'Tricep kickback (cable)',
       ] },
       { name: 'Compound (all heads)', items: [
