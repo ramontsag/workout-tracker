@@ -315,7 +315,13 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
               : 'rest'
             const typeClass = `day-card--${indicatorType}`
             const hasDraft  = draftDayIds.has(day.id)
-            const isDone    = !!weeklyProgress?.completedDayIds?.includes(day.id)
+            // ✓ now follows the CALENDAR day work happened on, not the
+            // planned training_day_id. So if Sunday's plan was done on
+            // Monday, Sunday stays unchecked and Monday gets the ✓.
+            // The pill row below shows what was actually done on each
+            // calendar day, regardless of plan.
+            const calendarActual = weeklyProgress?.actualByWeekday?.[day.name] || []
+            const isDone    = calendarActual.length > 0
             // Per-day completion badge ("2/3") — only meaningful on days with
             // multiple items. Hidden on rest/empty days and on single-item
             // days where the ✓ already implies "all done".

@@ -1502,11 +1502,29 @@ export async function getWeeklyProgress(uid) {
   }
 
   // Map each completed workout to the WEEKDAY it actually happened on (local
-  // time, not the day's plan). Drives the "actual" pill on Home — the user
-  // can see e.g. "✓ Push A" on Monday even though Push A is Sunday's plan,
-  // because they did Sunday's session on Monday. Doesn't replace the
-  // training-day ✓ — both signals coexist so the plan view stays intact.
+  // time, not the day's plan). Drives both the day-card ✓ and the "actual"
+  // pill row on Home — both follow the calendar day work happened on, not
+  // the day it was originally planned for.
   const WEEKDAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+
+  // Resolve training_day_id → planned weekday name. Used by the on-schedule
+  // check below: we can't rely on workouts.day_name for this because
+  // activity sessions use the activity's name (not the weekday) as their
+  // day_name. Querying training_days separately keeps PostgREST's
+  // relationship inference out of the hot path.
+  const trainingDayIds = Array.from(new Set(
+    weekWorkouts.map(w => w.training_day_id).filter(Boolean)
+  ))
+  const dayNameById = {}
+  if (trainingDayIds.length) {
+    const { data: tds } = await withTimeout(
+      supabase.from('training_days').select('id, name')
+        .eq('user_id', uid).in('id', trainingDayIds),
+      5000, 'Load planned day names'
+    )
+    for (const td of (tds || [])) dayNameById[td.id] = td.name
+  }
+
   const actualByWeekday = {}
   for (const w of weekWorkouts) {
     if (!w.completed_at) continue
@@ -1525,12 +1543,17 @@ export async function getWeeklyProgress(uid) {
       label = (w.day_name || '').trim()
     }
     if (!label) continue
+    // On-schedule = the planned training day's name matches the calendar
+    // weekday this completion landed on. Uses dayNameById from the
+    // separate training_days lookup above so this works correctly for
+    // activity sessions (whose day_name is the activity name, not a
+    // weekday).
+    const plannedDayName = dayNameById[w.training_day_id] || ''
+    const onSchedule = plannedDayName.toLowerCase() === wd.toLowerCase()
     ;(actualByWeekday[wd] ||= []).push({
       label,
       kind: w.kind || 'workout',
-      // Whether this completion was on its scheduled weekday — UI uses this
-      // to suppress the pill when it would just duplicate the existing ✓.
-      onSchedule: !!(w.day_name && w.day_name.toLowerCase().startsWith(wd.toLowerCase())),
+      onSchedule,
     })
   }
 
