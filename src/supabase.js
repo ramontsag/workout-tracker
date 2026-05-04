@@ -1408,7 +1408,7 @@ export async function getWeeklyProgress(uid) {
     ),
     withTimeout(
       supabase.from('workouts')
-        .select('id, day_name, training_day_id, kind, activity_name, workout_block_id')
+        .select('id, day_name, training_day_id, kind, activity_name, workout_block_id, completed_at')
         .eq('user_id', uid)
         .eq('status', 'completed')
         .gte('completed_at', weekStart),
@@ -1485,12 +1485,46 @@ export async function getWeeklyProgress(uid) {
     }
   }
 
+  // Map each completed workout to the WEEKDAY it actually happened on (local
+  // time, not the day's plan). Drives the "actual" pill on Home — the user
+  // can see e.g. "✓ Push A" on Monday even though Push A is Sunday's plan,
+  // because they did Sunday's session on Monday. Doesn't replace the
+  // training-day ✓ — both signals coexist so the plan view stays intact.
+  const WEEKDAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const actualByWeekday = {}
+  for (const w of weekWorkouts) {
+    if (!w.completed_at) continue
+    const d = new Date(w.completed_at)
+    const wd = WEEKDAY_NAMES[d.getDay()]
+    if (!wd) continue
+    // Friendly label: prefer the block portion of day_name ("Sunday — Push A"
+    // → "Push A"), fall back to activity_name for activity sessions, finally
+    // to the raw day_name.
+    let label = ''
+    if (w.kind === 'activity' && w.activity_name) {
+      label = w.activity_name
+    } else if (w.day_name && w.day_name.includes('—')) {
+      label = w.day_name.split('—').slice(1).join('—').trim()
+    } else {
+      label = (w.day_name || '').trim()
+    }
+    if (!label) continue
+    ;(actualByWeekday[wd] ||= []).push({
+      label,
+      kind: w.kind || 'workout',
+      // Whether this completion was on its scheduled weekday — UI uses this
+      // to suppress the pill when it would just duplicate the existing ✓.
+      onSchedule: !!(w.day_name && w.day_name.toLowerCase().startsWith(wd.toLowerCase())),
+    })
+  }
+
   return {
     completed, target,
     workouts: exerciseWorkoutCount,
     activities: activityCount,
     completedDayIds,
     dayCompletion: dayCompletionCounts,
+    actualByWeekday,
   }
 }
 

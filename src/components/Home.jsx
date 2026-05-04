@@ -354,6 +354,35 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                   </div>
                   <div className="day-card__focus">{dayTitle}</div>
                   {countLabel && <div className="day-card__count">{countLabel}</div>}
+                  {/* "Actual" pills — what was done on this CALENDAR day,
+                      surfaced only when the work landed off-schedule (e.g.
+                      you did Sunday's plan on Monday). On-schedule
+                      completions are already represented by the ✓ on the
+                      right, so we suppress them here to avoid noise. */}
+                  {(() => {
+                    const list = (weeklyProgress?.actualByWeekday?.[day.name] || [])
+                      .filter(a => !a.onSchedule)
+                    if (!list.length) return null
+                    const seen = new Set()
+                    const unique = list.filter(a => {
+                      const k = `${a.kind}:${a.label.toLowerCase()}`
+                      if (seen.has(k)) return false
+                      seen.add(k); return true
+                    })
+                    return (
+                      <div className="day-card__actual">
+                        {unique.map((a, k) => (
+                          <span
+                            key={k}
+                            className={`day-card__actual-pill day-card__actual-pill--${a.kind}`}
+                            title={`Actually done on ${day.name}`}
+                          >
+                            ✓ {a.label}
+                          </span>
+                        ))}
+                      </div>
+                    )
+                  })()}
                 </div>
                 <div className="day-card__indicator-wrap">
                   {showBadge && (

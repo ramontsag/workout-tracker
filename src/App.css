@@ -462,6 +462,33 @@ a { color: inherit; text-decoration: none; }
   padding: 2px 7px;
   line-height: 1.2;
 }
+/* "Actual" pills — render under the day name/focus when work was logged on
+   this calendar day but not as part of this day's plan (e.g. Sunday's
+   workout done on Monday). Compact and quiet so they augment, not compete
+   with, the planned-day labelling. */
+.day-card__actual {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.day-card__actual-pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(0, 194, 168, 0.12);
+  border: 1px solid rgba(0, 194, 168, 0.40);
+  color: #6FE0CD;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.day-card__actual-pill--workout {
+  background: rgba(255, 85, 0, 0.10);
+  border-color: rgba(255, 85, 0, 0.40);
+  color: #FFB088;
+}
 .day-card__indicator-circle {
   width: 26px;
   height: 26px;
