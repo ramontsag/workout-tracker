@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import {
   logBodyWeight, getBodyWeightLogs,
-  getExerciseNames, getVolumeHistory,
+  getExerciseNames, getVolumeHistory, getLiftSummary,
   getActivityNames, getActivityHistory, bucketActivityByWeek,
   getBodyMeasurements,
   getStrengthHistory,
@@ -40,6 +40,20 @@ function getToday() {
 
 function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
+// Friendly "X days ago" / "today" / "yesterday" — used in the Lift card so
+// PR dates read at-a-glance instead of as raw ISO strings.
+function fmtRelative(iso) {
+  if (!iso) return ''
+  const ms = Date.now() - new Date(iso).getTime()
+  const days = Math.floor(ms / (24 * 60 * 60 * 1000))
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 7)   return `${days} days ago`
+  if (days < 30)  return `${Math.floor(days / 7)} wk ago`
+  if (days < 365) return `${Math.floor(days / 30)} mo ago`
+  return fmtDate(iso)
 }
 
 // ── Generic trend line ────────────────────────────────────────
@@ -245,6 +259,8 @@ export default function ProgressScreen({ user, profile, onBack }) {
   const [liftsMetric,       setLiftsMetric]       = useState('volume')  // 'volume' | 'e1rm'
   const [liftsRange,        setLiftsRange]        = useState('6m')      // '4w' | '3m' | '6m' | 'all'
   const [showFormulaInfo,   setShowFormulaInfo]   = useState(false)
+  // Headline summary for the selected lift — drives the new "Lift card" view.
+  const [liftSummary,       setLiftSummary]       = useState(null)
 
   // ── Activities state ────────────────────────────────────
   const [activityNames,    setActivityNames]    = useState([])
@@ -289,6 +305,11 @@ export default function ProgressScreen({ user, profile, onBack }) {
     getVolumeHistory(selectedExercise, user.id)
       .then(data => { setVolumeHistory(data); setVolumeLoading(false) })
       .catch(e  => { setVolumeError(e.message); setVolumeLoading(false) })
+    // Pull headline-card metrics in parallel — single round-trip computes
+    // every "fun number" the new Lift card displays.
+    getLiftSummary(selectedExercise, user.id)
+      .then(setLiftSummary)
+      .catch(() => setLiftSummary(null))
   }, [selectedExercise, user?.id])
 
   useEffect(() => {
@@ -694,40 +715,6 @@ export default function ProgressScreen({ user, profile, onBack }) {
                   ))}
                 </select>
 
-                {/* Metric + range controls */}
-                <div className="lifts-controls">
-                  <div className="lifts-toggle" role="tablist">
-                    <button
-                      className={`lifts-toggle__btn${liftsMetric === 'volume' ? ' lifts-toggle__btn--on' : ''}`}
-                      onClick={() => setLiftsMetric('volume')}
-                    >Volume</button>
-                    <button
-                      className={`lifts-toggle__btn${liftsMetric === 'e1rm' ? ' lifts-toggle__btn--on' : ''}`}
-                      onClick={() => setLiftsMetric('e1rm')}
-                    >e1RM</button>
-                  </div>
-                  <div className="lifts-range">
-                    {[
-                      { k: '4w',  l: '4w'  },
-                      { k: '3m',  l: '3m'  },
-                      { k: '6m',  l: '6m'  },
-                      { k: 'all', l: 'All' },
-                    ].map(({ k, l }) => (
-                      <button
-                        key={k}
-                        className={`lifts-range__btn${liftsRange === k ? ' lifts-range__btn--on' : ''}`}
-                        onClick={() => setLiftsRange(k)}
-                      >{l}</button>
-                    ))}
-                  </div>
-                  <button
-                    className="lifts-info-btn"
-                    onClick={() => setShowFormulaInfo(true)}
-                    aria-label="How are PRs and e1RM calculated?"
-                    title="How are PRs and e1RM calculated?"
-                  >ⓘ</button>
-                </div>
-
                 {volumeLoading && (
                   <div className="state-msg state-msg--empty">Loading…</div>
                 )}
@@ -735,43 +722,124 @@ export default function ProgressScreen({ user, profile, onBack }) {
                   <div className="err-msg" style={{ textAlign: 'left' }}>{volumeError}</div>
                 )}
 
-                {!volumeLoading && !volumeError && (
-                  <>
-                    {liftsSparkValues.length >= 2 && (
-                      <div className="sparkline-wrap">
-                        <Sparkline
-                          values={liftsSparkValues}
-                          color={liftsMetric === 'volume' ? '#3b82f6' : '#FFB800'}
-                        />
-                      </div>
-                    )}
-                    {filteredVolumeHistory.length > 0 ? (
-                      <div className="weight-history-list">
-                        {filteredVolumeHistory.map(s => {
-                          const valKg = liftsMetric === 'volume' ? s.totalVolume : (s.maxE1RMkg || 0)
-                          const val   = unit === 'lbs' ? kgToLbs(valKg) : valKg
-                          const suffix = liftsMetric === 'volume' ? `${label}·reps` : label
-                          return (
-                            <div key={s.workoutId} className="weight-history-item">
-                              <span className="weight-history-date">{fmtDate(s.date)}</span>
-                              <span className="weight-history-val">
-                                {valKg > 0
-                                  ? <>{Math.round(val).toLocaleString()} {suffix}</>
-                                  : '—'}
-                              </span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ) : (
+                {!volumeLoading && !volumeError && (() => {
+                  const sum = liftSummary
+                  const hasData = sum && (sum.bestSet || sum.mostReps || sum.totalVolumeKg > 0)
+                  if (!hasData) {
+                    return (
                       <div className="state-msg state-msg--empty">
-                        {volumeHistory.length === 0
-                          ? 'No sessions logged yet'
-                          : 'No sessions in this range'}
+                        No sessions logged for this lift yet
                       </div>
-                    )}
-                  </>
-                )}
+                    )
+                  }
+
+                  const totalVolDisp = unit === 'lbs' ? kgToLbs(sum.totalVolumeKg) : sum.totalVolumeKg
+
+                  return (
+                    <>
+                      <div className="lift-summary-card">
+                        <div className="lift-summary-grid">
+                          {sum.bestSet && (
+                            <div className="lift-stat">
+                              <div className="lift-stat__icon" aria-hidden="true">🏆</div>
+                              <div className="lift-stat__label">Strongest set</div>
+                              <div className="lift-stat__value">
+                                {displayWeight(sum.bestSet.weight_kg, unit)} {label} × {sum.bestSet.reps}
+                              </div>
+                              <div className="lift-stat__meta">{fmtRelative(sum.bestSet.date)}</div>
+                            </div>
+                          )}
+                          {sum.mostReps && (
+                            <div className="lift-stat">
+                              <div className="lift-stat__icon" aria-hidden="true">🔥</div>
+                              <div className="lift-stat__label">Most reps</div>
+                              <div className="lift-stat__value">
+                                {sum.mostReps.reps} reps @ {displayWeight(sum.mostReps.weight_kg, unit)} {label}
+                              </div>
+                              <div className="lift-stat__meta">{fmtRelative(sum.mostReps.date)}</div>
+                            </div>
+                          )}
+                          {sum.bestE1RMkg > 0 && (
+                            <div className="lift-stat">
+                              <div className="lift-stat__icon" aria-hidden="true">📈</div>
+                              <div className="lift-stat__label">Best e1RM</div>
+                              <div className="lift-stat__value">
+                                ≈ {displayWeight(sum.bestE1RMkg, unit)} {label}
+                              </div>
+                              <div className="lift-stat__meta">Epley estimate</div>
+                            </div>
+                          )}
+                          {sum.totalVolumeKg > 0 && (
+                            <div className="lift-stat">
+                              <div className="lift-stat__icon" aria-hidden="true">💪</div>
+                              <div className="lift-stat__label">Lifetime volume</div>
+                              <div className="lift-stat__value">
+                                {Math.round(totalVolDisp).toLocaleString()} {label}
+                              </div>
+                              <div className="lift-stat__meta">
+                                {sum.sessionCount} session{sum.sessionCount === 1 ? '' : 's'}
+                              </div>
+                            </div>
+                          )}
+                          {sum.lastPerformedAt && (
+                            <div className="lift-stat lift-stat--wide">
+                              <div className="lift-stat__icon" aria-hidden="true">⏱</div>
+                              <div className="lift-stat__label">Last performed</div>
+                              <div className="lift-stat__value">{fmtRelative(sum.lastPerformedAt)}</div>
+                              <div className="lift-stat__meta">{fmtDate(sum.lastPerformedAt)}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Trend chart — single line of e1RM (or volume) over the
+                          chosen range. The metric toggle is now scoped to the
+                          chart, since the headline numbers above already cover
+                          both axes. */}
+                      <div className="lifts-controls">
+                        <div className="lifts-toggle" role="tablist">
+                          <button
+                            className={`lifts-toggle__btn${liftsMetric === 'volume' ? ' lifts-toggle__btn--on' : ''}`}
+                            onClick={() => setLiftsMetric('volume')}
+                          >Volume</button>
+                          <button
+                            className={`lifts-toggle__btn${liftsMetric === 'e1rm' ? ' lifts-toggle__btn--on' : ''}`}
+                            onClick={() => setLiftsMetric('e1rm')}
+                          >e1RM</button>
+                        </div>
+                        <div className="lifts-range">
+                          {[
+                            { k: '4w',  l: '4w'  },
+                            { k: '3m',  l: '3m'  },
+                            { k: '6m',  l: '6m'  },
+                            { k: 'all', l: 'All' },
+                          ].map(({ k, l }) => (
+                            <button
+                              key={k}
+                              className={`lifts-range__btn${liftsRange === k ? ' lifts-range__btn--on' : ''}`}
+                              onClick={() => setLiftsRange(k)}
+                            >{l}</button>
+                          ))}
+                        </div>
+                        <button
+                          className="lifts-info-btn"
+                          onClick={() => setShowFormulaInfo(true)}
+                          aria-label="How are PRs and e1RM calculated?"
+                          title="How are PRs and e1RM calculated?"
+                        >ⓘ</button>
+                      </div>
+
+                      {liftsSparkValues.length >= 2 && (
+                        <div className="sparkline-wrap">
+                          <Sparkline
+                            values={liftsSparkValues}
+                            color={liftsMetric === 'volume' ? '#3b82f6' : '#FFB800'}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </>
             )}
           </>

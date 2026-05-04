@@ -2358,6 +2358,70 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 .lifts-info-btn:active { opacity: 0.6; }
 
+/* Headline summary card on Progress > Lifts. Shows every "fun number" for
+   the selected lift in one glance — strongest set, most reps, e1RM,
+   lifetime volume, last performed. Two-column grid that collapses to one
+   on the narrowest screens. */
+.lift-summary-card {
+  margin-top: 14px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(255, 85, 0, 0.05), rgba(255, 85, 0, 0.01));
+  border: 1px solid rgba(255, 85, 0, 0.30);
+  border-radius: var(--radius);
+}
+.lift-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.lift-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;
+}
+.lift-stat--wide {
+  grid-column: 1 / -1;
+}
+.lift-stat__icon {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 16px;
+  opacity: 0.85;
+  line-height: 1;
+}
+.lift-stat__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-right: 22px;
+}
+.lift-stat__value {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+  font-family: var(--font-display);
+  letter-spacing: 0.2px;
+  padding-right: 22px;
+  line-height: 1.2;
+}
+.lift-stat__meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+@media (max-width: 360px) {
+  .lift-summary-grid { grid-template-columns: 1fr; }
+  .lift-stat--wide { grid-column: auto; }
+}
+
 .exhist-count {
   margin-left: auto;
   font-size: 11px;
@@ -2871,6 +2935,31 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   font-size: 12px;
   color: var(--text-muted);
 }
+.archive-card-last {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.archive-history-btn {
+  margin-top: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.15s, color 0.15s;
+}
+.archive-history-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.archive-history-btn:active { opacity: 0.8; }
 .archive-card-chevron {
   font-size: 11px;
   color: var(--text-muted);

@@ -6,7 +6,7 @@ import {
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
   insertCompletedSession, updateCompletedSession, completeWorkout,
   getTemplates, getLastSetsByExercise, updateExerciseSetCount,
-  getLastSessionForBlock,
+  getLastSessionForBlock, getCompletedWorkout,
   getGyms, createGym, updateGym, deleteGym, setActiveGym,
 } from '../supabase'
 import GymPickerSheet from './GymPickerSheet'
@@ -300,12 +300,14 @@ function ExerciseCard({
   onRemoveExercise, onCopyLast, onAddDrop, onFocusWeight,
   dropMode = 'off',
 }) {
-  // For dropMode='last' we only surface "+ Drop" on the LAST completed working
-  // set, so the user only ever drops from the heaviest/final set. 'all' shows
-  // it on every completed working set.
-  let lastWorkingDoneIdx = -1
+  // dropMode='last' surfaces "+ Drop" only after the LAST working set so the
+  // user can only drop from the final set. 'all' surfaces it after every
+  // working set. We deliberately don't require the parent set to be marked
+  // done — the option appears as soon as the row exists so the user sees the
+  // affordance immediately when they pick a drop-set mode.
+  let lastWorkingIdx = -1
   ;(sets || []).forEach((s, i) => {
-    if (s && s.done && !s.is_warmup && !s.is_drop_set) lastWorkingDoneIdx = i
+    if (s && !s.is_warmup && !s.is_drop_set) lastWorkingIdx = i
   })
   const prog = progressIndicator(sets, lastSets, unit)
   const label = unitLabel(unit)
@@ -436,12 +438,12 @@ function ExerciseCard({
                 </div>
               )}
               {/* + Drop placement depends on the exercise's drop_set_mode:
-                    'all'  → every completed working set offers it,
-                    'last' → only the last completed working set offers it,
+                    'all'  → under every working set (warmups/drops excluded),
+                    'last' → only under the last working set,
                     'off'  → never (onAddDrop is undefined). */}
-              {set.done && !set.is_warmup && !isDrop && onAddDrop && (
+              {!set.is_warmup && !isDrop && onAddDrop && (
                 dropMode === 'all' ||
-                (dropMode === 'last' && idx === lastWorkingDoneIdx)
+                (dropMode === 'last' && idx === lastWorkingIdx)
               ) && (
                 <button
                   className="add-drop-btn"
@@ -1450,15 +1452,17 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     })
   }
 
-  // Check-mode toggle — flip `checked` and start the rest timer if enabled.
+  // Check-mode toggle — flip `checked`. Each tick still persists as a set on
+  // completion (insertCompletedSession writes a workout_sets row with
+  // checked=true), but ticking does NOT start the rest timer: check-mode is
+  // for things you don't time between (mobility, finishers, bodyweight
+  // accessories), so the timer would only get in the way.
   const toggleCheck = (exName, idx) => {
     setSets(prev => {
       const current = prev[exName] || []
       const updated = current.map((s, i) => i === idx ? { ...s, checked: !s.checked } : s)
       return { ...prev, [exName]: updated }
     })
-    const wasChecked = !!sets[exName]?.[idx]?.checked
-    if (!wasChecked && timerEnabled) restTimer.start(restSeconds, day.id, blockId)
   }
 
   const getLastSets = (exName) => {
@@ -1774,14 +1778,12 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     }
   }
 
-  // Open the most recent completed session for THIS block in edit mode so the
-  // user can fix yesterday's typo without losing today's draft. Only the LAST
-  // workout is editable — older history is read-only by design.
-  const handleOpenHistory = () => {
-    if (!previousBlockSession) return
-    const { workout, sets: dbSets } = previousBlockSession
+  // Hydrate the cards from a completed workout's DB rows and enter edit
+  // mode. Used by both the in-header "History" pill (last session of THIS
+  // block) and the deep-link from Archives (any specific completed workout
+  // id, e.g. "view last session" of a saved template).
+  const hydrateFromCompleted = (workout, dbSets) => {
     if (!workout?.id) return
-    // Group DB rows by exercise name so we can rebuild the cards.
     const grouped = {}
     for (const s of (dbSets || [])) {
       ;(grouped[s.exercise_name] ||= []).push(s)
@@ -1790,7 +1792,6 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     for (const ex of exerciseItems) {
       const rows = (grouped[ex.name] || []).sort((a, b) => a.set_number - b.set_number)
       if (!rows.length) {
-        // Exercise was added since that workout — keep an empty card.
         const n = Math.max(1, ex.set_count ?? 2)
         next[ex.name] = Array.from({ length: n }, () => makeEmptySet())
         continue
@@ -1815,6 +1816,28 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     setErrMsg('')
     setNeedsStart(false)
   }
+
+  // Open the most recent completed session for THIS block in edit mode so the
+  // user can fix yesterday's typo without losing today's draft. Only the LAST
+  // workout is editable — older history is read-only by design.
+  const handleOpenHistory = () => {
+    if (!previousBlockSession) return
+    hydrateFromCompleted(previousBlockSession.workout, previousBlockSession.sets)
+  }
+
+  // Deep-link path: when App.jsx routes here with editingCompletedId set
+  // (Archives "View last session" button), pull the workout + sets and run
+  // the same hydration. Effect runs once on mount per id change.
+  useEffect(() => {
+    if (!editingCompletedId || !userId) return
+    let cancelled = false
+    getCompletedWorkout(editingCompletedId, userId).then(payload => {
+      if (cancelled || !payload) return
+      hydrateFromCompleted(payload.workout, payload.sets)
+    }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingCompletedId, userId])
 
   const handleArchiveTrigger = () => {
     setArchiveName(blockName && blockName !== 'Workout' ? blockName : day.name)
@@ -2299,6 +2322,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                     try { await discardDraft(workoutIdRef.current, userId) } catch {}
                   }
                   setWorkoutStartedAt(null)
+                  // Stop the rest timer too — the floating pill is global, so
+                  // it survived navigation otherwise. Cancelling means
+                  // everything from this session goes away.
+                  restTimer.stop()
                   // Release the active-workout lock if this is the active one.
                   const existing = getActiveWorkout()
                   if (existing.active && existing.dayId === day.id && existing.blockId === blockId) {

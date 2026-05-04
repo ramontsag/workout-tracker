@@ -521,6 +521,49 @@ export async function getLastSession(trainingDayId) {
   return { workout: sessions[0], sets: sets || [] }
 }
 
+// Most recent completed gym session for ANY block matching a given template
+// name — drives the per-template "Last performed" row in Archives. Templates
+// don't have a hard FK to blocks (yet), so we match on (user_id, name) which
+// is how saveTemplate / templateExistsForBlock have always been linked.
+// Returns { workout, sets } or null. workout includes training_day_id +
+// workout_block_id so the caller can deep-link into the right day/block.
+export async function getLastSessionForTemplateName(templateName, uid) {
+  if (!uid || !templateName) return null
+  const trimmed = (templateName || '').trim()
+  if (!trimmed) return null
+
+  const { data: blocks } = await withTimeout(
+    supabase.from('workout_blocks').select('id')
+      .eq('user_id', uid)
+      .ilike('name', trimmed),
+    5000, 'Find blocks for template'
+  )
+  const blockIds = (blocks || []).map(b => b.id)
+  if (!blockIds.length) return null
+
+  const { data: sessions } = await withTimeout(
+    supabase
+      .from('workouts')
+      .select('id, completed_at, training_day_id, workout_block_id, day_name')
+      .eq('user_id', uid)
+      .eq('status', 'completed')
+      .eq('kind', 'workout')
+      .in('workout_block_id', blockIds)
+      .order('completed_at', { ascending: false })
+      .limit(1),
+    5000, 'Load template last session'
+  )
+  if (!sessions?.length) return null
+
+  const { data: sets } = await withTimeout(
+    supabase.from('workout_sets').select('*')
+      .eq('workout_id', sessions[0].id)
+      .order('set_number', { ascending: true }),
+    5000, 'Load template last session sets'
+  )
+  return { workout: sessions[0], sets: sets || [] }
+}
+
 // Most recent completed gym session for a SPECIFIC block — used by the
 // "History" pill so the Edit-last-workout flow always targets this block,
 // even if a sibling block was the last thing the user finished today.
@@ -1855,6 +1898,71 @@ export async function getExerciseBests(exerciseNames, uid) {
     if (!b.maxRepsAtWeight[key] || r > b.maxRepsAtWeight[key]) b.maxRepsAtWeight[key] = r
   }
   return bests
+}
+
+// Headline summary card for one lift — drives the new Progress > Lifts view.
+// Returns every "fun number" we can derive from this user's history of
+// `exerciseName`, in one round-trip:
+//   - bestE1RMkg:     best Epley-estimated 1RM (warmups + drops excluded)
+//   - bestSet:        the set that produced that e1RM ({ weight_kg, reps, date })
+//   - mostReps:       highest reps in any working set, with the weight done at
+//   - bestWeightKg:   the heaviest single working set, regardless of reps
+//   - totalVolumeKg:  lifetime sum of weight × reps for working sets
+//                     (drop sets included — they're real work)
+//   - lastPerformedAt: ISO date of the most recent set with valid weight × reps
+//   - sessionCount:   number of distinct workouts containing a working set
+export async function getLiftSummary(exerciseName, uid) {
+  if (!uid || !exerciseName) return null
+  const { data, error } = await withTimeout(
+    supabase
+      .from('workout_sets')
+      .select('weight_kg, reps, is_warmup, is_drop_set, workout:workouts(id, completed_at)')
+      .eq('exercise_name', exerciseName)
+      .eq('user_id', uid),
+    5000, 'Load lift summary'
+  )
+  if (error) throw new Error(`Load lift summary failed: ${error.message}`)
+
+  let bestE1RMkg  = 0
+  let bestSet     = null
+  let mostReps    = null
+  let bestWeightKg = 0
+  let totalVolumeKg = 0
+  let lastPerformedAt = null
+  const workoutIds = new Set()
+
+  for (const row of (data || [])) {
+    if (row.is_warmup) continue
+    const w = Number(row.weight_kg || 0)
+    const r = Number(row.reps || 0)
+    const date = row.workout?.completed_at
+    if (!(w > 0 && r > 0)) continue
+
+    totalVolumeKg += w * r
+    if (row.workout?.id) workoutIds.add(row.workout.id)
+    if (date && (!lastPerformedAt || new Date(date) > new Date(lastPerformedAt))) {
+      lastPerformedAt = date
+    }
+
+    // Drop sets count toward lifetime volume, but never toward PR / "strongest"
+    // calculations — they're not a top-set rep test.
+    if (row.is_drop_set) continue
+
+    const e1rm = w * (1 + r / 30)
+    if (e1rm > bestE1RMkg) {
+      bestE1RMkg = e1rm
+      bestSet = { weight_kg: w, reps: r, date }
+    }
+    if (w > bestWeightKg) bestWeightKg = w
+    if (!mostReps || r > mostReps.reps || (r === mostReps.reps && w > mostReps.weight_kg)) {
+      mostReps = { weight_kg: w, reps: r, date }
+    }
+  }
+
+  return {
+    bestE1RMkg, bestSet, mostReps, bestWeightKg, totalVolumeKg,
+    lastPerformedAt, sessionCount: workoutIds.size,
+  }
 }
 
 // ── Volume Stats ──────────────────────────────────────────────

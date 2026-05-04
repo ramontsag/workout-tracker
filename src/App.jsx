@@ -25,6 +25,9 @@ export default function App() {
   const [activeDay,       setActiveDay]      = useState(null)
   const [activeBlock,     setActiveBlock]    = useState(null)
   const [activeExercise,  setActiveExercise] = useState(null)
+  // When set, WorkoutDay opens the named completed session in edit mode
+  // (Archives "View last session"). Cleared when navigating away.
+  const [editingCompletedId, setEditingCompletedId] = useState(null)
   const [totalWorkouts,   setTotalWorkouts]  = useState(null)
   const [totalActivities, setTotalActivities] = useState(null)
   const [profile,         setProfile]        = useState(null)
@@ -194,11 +197,13 @@ export default function App() {
           program={program}
           userId={user?.id}
           profile={profile}
+          editingCompletedId={editingCompletedId}
           onBack={() => {
+            setEditingCompletedId(null)
             if (hasActivities || multipleBlocks) { setActiveBlock(null); go('day') }
             else { setActiveDay(null); setActiveBlock(null); go('home') }
           }}
-          onCompleteHome={() => { setActiveDay(null); setActiveBlock(null); go('home') }}
+          onCompleteHome={() => { setEditingCompletedId(null); setActiveDay(null); setActiveBlock(null); go('home') }}
           onHistory={exercise => { setActiveExercise(exercise); go('history') }}
           onProgramUpdated={refreshProgram}
           onProfileUpdated={setProfile}
@@ -237,6 +242,17 @@ export default function App() {
           program={program}
           onBack={() => go('profile')}
           onProgramUpdated={refreshProgram}
+          onViewSession={({ workoutId, dayId, blockId }) => {
+            const day = program.find(d => d.id === dayId)
+            if (!day) return
+            const block = blockId
+              ? (day.workout_blocks || []).find(b => b.id === blockId) || null
+              : null
+            setActiveDay(day)
+            setActiveBlock(block)
+            setEditingCompletedId(workoutId)
+            go('workout')
+          }}
         />
       )
     }
