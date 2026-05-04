@@ -4,7 +4,7 @@ import {
   getInProgressWorkout, upsertDraft, discardDraft,
   addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames,
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
-  insertCompletedSession, updateCompletedSession,
+  insertCompletedSession, updateCompletedSession, completeWorkout,
   getTemplates, getLastSetsByExercise, updateExerciseSetCount,
   getGyms, createGym, updateGym, deleteGym, setActiveGym,
 } from '../supabase'
@@ -1571,6 +1571,11 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   }
 
   // Complete the gym block (kind='workout') only — does not touch activities.
+  // We transition the existing draft row in place via completeWorkout so the
+  // workout id stays stable: the post-completion "Edit" path then targets the
+  // SAME row and updateCompletedSession finds it. If autosave hasn't fired yet
+  // (the user logged and tapped Complete inside the 5s debounce) we force a
+  // synchronous draft create here so there's always a row to transition.
   const handleCompleteWorkout = async () => {
     const hasExerciseData = Object.values(sets).some(s => s.some(r => r.weight !== '' || r.reps !== '' || r.checked))
     if (!hasExerciseData) {
@@ -1584,17 +1589,26 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       const trackModeMap = buildTrackModeMap()
       const dayLabel = `${day.name}${blockName && blockName !== 'Workout' ? ` — ${blockName}` : ''}`
 
-      const workout = await insertCompletedSession({
-        trainingDayId:  day.id,
-        dayLabel,
-        kind:           'workout',
-        workoutBlockId: blockId,
-        // Prefer the gym frozen at Start time. Fall back to the current
-        // active gym for paths that skipped Start (resumed drafts, edits).
-        gymId:          stampedGymId ?? activeGymId,
-        exerciseSets:   setsForSave,
-        trackModeMap,
-      }, userId)
+      // Ensure a draft row exists. flushDraft is a no-op when nothing's pending.
+      if (!workoutIdRef.current) {
+        const draft = await upsertDraft({
+          workoutId:      null,
+          trainingDayId:  day.id,
+          workoutBlockId: blockId,
+          dayLabel,
+          gymId:          stampedGymId ?? activeGymId,
+          draftState:     { sets, activityLogs, exerciseList },
+        }, userId)
+        if (draft?.id) {
+          workoutIdRef.current = draft.id
+          setWorkoutId(draft.id)
+        }
+      }
+      if (!workoutIdRef.current) throw new Error('Could not create workout row.')
+
+      const workout = await completeWorkout(
+        workoutIdRef.current, dayLabel, setsForSave, {}, userId, trackModeMap, 'workout'
+      )
 
       const currentVolKg = calcSessionVolume(sets, unit)
       let msg = ''
@@ -1655,11 +1669,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       setExtraSetsBumps(bumps)
 
       // Workout is done — tear down the draft so we don't resume into an
-      // already-saved session.
+      // already-saved session. completeWorkout already cleared draft_state on
+      // the row, so discardDraft is no longer needed — that would delete the
+      // freshly-completed workout (B2/B3 from the audit).
       clearLsDraft(lsKey)
-      if (workoutIdRef.current) {
-        try { await discardDraft(workoutIdRef.current, userId) } catch {}
-      }
       // Release the global "active workout" lock so other workouts can start.
       const existing = getActiveWorkout()
       if (existing.active && existing.dayId === day.id && existing.blockId === blockId) {

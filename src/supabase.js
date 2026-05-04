@@ -1449,13 +1449,19 @@ export async function saveSettings(fields, uid) {
 // ── Stats ─────────────────────────────────────────────────────
 
 export async function getStats() {
+  // totalWorkouts counts gym sessions only (kind='workout'); totalActivities
+  // counts activity sessions (kind='activity'). Pre-fix this used a count of
+  // every checked workout_sets row, which inflated the activities total with
+  // every check-mode exercise tick (audit M2).
   const [workoutsRes, activitiesRes] = await Promise.all([
     withTimeout(
-      supabase.from('workouts').select('*', { count: 'exact', head: true }).eq('status', 'completed'),
+      supabase.from('workouts').select('*', { count: 'exact', head: true })
+        .eq('status', 'completed').eq('kind', 'workout'),
       5000, 'Load stats'
     ),
     withTimeout(
-      supabase.from('workout_sets').select('*', { count: 'exact', head: true }).eq('checked', true),
+      supabase.from('workouts').select('*', { count: 'exact', head: true })
+        .eq('status', 'completed').eq('kind', 'activity'),
       5000, 'Load activity stats'
     ).catch(() => ({ count: 0 })),
   ])
@@ -1754,42 +1760,30 @@ export async function deleteTemplate(templateId) {
   if (error) throw new Error(`Delete failed: ${error.message}`)
 }
 
-// Replace a training day's exercises with the template's exercises.
+// Apply a template to a training day as a NEW workout block — additive.
+// Existing blocks, exercises, and activities on the day stay put. The new
+// block is named after the template and seeded with the template's
+// exercises via createWorkoutBlock(... {fromTemplateId}). This is the
+// behaviour the owner asked for: "everything that's already in that day
+// stays". Returns the newly-created block row so callers can refresh state.
 export async function applyTemplate(templateId, trainingDayId, uid) {
   if (!uid) throw new Error('Not authenticated')
+  if (!trainingDayId) throw new Error('No day id')
+  if (!templateId)    throw new Error('No template id')
 
-  const { data: texs, error: fetchErr } = await withTimeout(
-    supabase
-      .from('template_exercises')
-      .select('*')
-      .eq('template_id', templateId)
-      .order('sort_order', { ascending: true }),
-    5000, 'Load template exercises'
+  const { data: tpl, error: tErr } = await withTimeout(
+    supabase.from('templates').select('id, name').eq('id', templateId).single(),
+    5000, 'Load template'
   )
-  if (fetchErr) throw new Error(`Load failed: ${fetchErr.message}`)
+  if (tErr)  throw new Error(`Load template failed: ${tErr.message}`)
+  if (!tpl)  throw new Error('Template not found')
 
-  const { error: delErr } = await withTimeout(
-    supabase.from('exercises').delete().eq('training_day_id', trainingDayId),
-    5000, 'Clear day exercises'
+  return await createWorkoutBlock(
+    trainingDayId,
+    tpl.name || 'Workout',
+    uid,
+    { fromTemplateId: templateId },
   )
-  if (delErr) throw new Error(`Clear failed: ${delErr.message}`)
-
-  if (texs?.length) {
-    const { error: insErr } = await withTimeout(
-      supabase.from('exercises').insert(
-        texs.map(e => ({
-          user_id:         uid,
-          training_day_id: trainingDayId,
-          name:            e.exercise_name,
-          item_type:       e.item_type  || 'exercise',
-          target:          e.target     || '',
-          sort_order:      e.sort_order,
-        }))
-      ),
-      5000, 'Apply template exercises'
-    )
-    if (insErr) throw new Error(`Apply failed: ${insErr.message}`)
-  }
 }
 
 // ── PR Tracking ───────────────────────────────────────────────

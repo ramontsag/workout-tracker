@@ -2935,6 +2935,12 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   white-space: nowrap;
 }
 .archive-apply-btn:disabled { opacity: 0.55; cursor: default; }
+.archive-apply-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
 .archive-delete-row {
   display: flex;
   align-items: center;

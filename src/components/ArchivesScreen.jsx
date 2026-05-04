@@ -117,7 +117,7 @@ export default function ArchivesScreen({ user, program, onBack, onProgramUpdated
                         [t.id]: { ...apply, dayId: e.target.value, done: false, error: '' },
                       }))}
                     >
-                      <option value="">Apply to day…</option>
+                      <option value="">Add to day…</option>
                       {program.map(d => (
                         <option key={d.id} value={d.id}>
                           {d.name}{d.focus ? ` — ${d.focus}` : ''}
@@ -129,8 +129,11 @@ export default function ArchivesScreen({ user, program, onBack, onProgramUpdated
                       onClick={() => handleApply(t.id)}
                       disabled={!apply.dayId || apply.saving || apply.done}
                     >
-                      {apply.saving ? '…' : apply.done ? '✓ Applied' : 'Apply'}
+                      {apply.saving ? '…' : apply.done ? '✓ Added' : 'Add'}
                     </button>
+                  </div>
+                  <div className="archive-apply-hint">
+                    Adds this workout as a new block on the chosen day — your existing exercises and activities stay.
                   </div>
                   {apply.error && (
                     <div className="err-msg" style={{ marginTop: 4 }}>{apply.error}</div>

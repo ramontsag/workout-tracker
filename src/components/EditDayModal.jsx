@@ -69,6 +69,11 @@ const EDIT_DAY_INFO = [
 export default function EditDayModal({ open, onClose, day, program, userId, onSaved }) {
   // Local working copy — mutated freely until Save.
   const [draft, setDraft] = useState(() => cloneDay(day))
+  // Snapshot at open-time so we can detect unsaved edits ("dirty" state). The
+  // per-block "Save as template" chip is disabled while dirty so the template
+  // never captures the unsaved working copy (audit M5).
+  const [openSnapshot, setOpenSnapshot] = useState(() => JSON.stringify(cloneDay(day)))
+  const isDirty = JSON.stringify(draft) !== openSnapshot
   const [pickerKind, setPickerKind] = useState(null)  // null | 'exercise' | 'activity'
   // Which block the rest picker is editing. null = closed.
   const [restPickerBlockId, setRestPickerBlockId] = useState(null)
@@ -84,7 +89,11 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   const [builderOpen, setBuilderOpen]     = useState(false)
 
   useEffect(() => {
-    if (open) setDraft(cloneDay(day))
+    if (open) {
+      const fresh = cloneDay(day)
+      setDraft(fresh)
+      setOpenSnapshot(JSON.stringify(fresh))
+    }
   }, [open, day])
 
   useEffect(() => {
@@ -356,8 +365,10 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                     )}
                     {!isActivity && !isCheck && (() => {
                       const dm = it.drop_set_mode || (it.has_drop_sets ? 'all' : 'off')
-                      const label = dm === 'all'  ? '↓ Dropset · All'
-                                  : dm === 'last' ? '↓ Dropset · Last'
+                      // Compact labels keep the row narrow so the × remove
+                      // button doesn't get pushed off-screen on 375px width.
+                      const label = dm === 'all'  ? '↓ All'
+                                  : dm === 'last' ? '↓ Last'
                                   : 'Dropset'
                       const title = dm === 'all'  ? 'Drop set offered on every working set — tap for last-only'
                                   : dm === 'last' ? 'Drop set offered on the last working set only — tap to disable'
@@ -524,12 +535,17 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                           type="button"
                           className="tpl-save-chip block-card__tpl"
                           onClick={() => handleSaveTemplate(block)}
-                          disabled={tplState === 'saving' || entries.length === 0}
-                          title="Save this workout as a reusable template"
+                          disabled={tplState === 'saving' || entries.length === 0 || isDirty}
+                          title={
+                            isDirty
+                              ? 'Tap "Save changes" first — templates capture the saved version.'
+                              : 'Save this workout as a reusable template'
+                          }
                         >
                           {tplState === 'saving' ? 'Saving…'
                            : tplState === 'done'  ? '✓ Saved'
                            : tplState === 'limit' ? 'Limit'
+                           : isDirty               ? 'Save day first'
                            : '⌂ Save as template'}
                         </button>
                       )}
