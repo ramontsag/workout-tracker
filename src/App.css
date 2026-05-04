@@ -873,45 +873,39 @@ a { color: inherit; text-decoration: none; }
    button. */
 .save-template-cta {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
   width: 100%;
-  margin-top: 14px;
-  padding: 14px 16px;
+  margin-top: 18px;
+  padding: 18px 20px;
   border-radius: var(--radius);
-  background: linear-gradient(180deg, rgba(255,85,0,0.12), rgba(255,85,0,0.04));
-  border: 1.5px solid rgba(255, 85, 0, 0.55);
+  background: linear-gradient(180deg, rgba(255,85,0,0.18), rgba(255,85,0,0.06));
+  border: 2px solid var(--accent);
   color: var(--text);
-  text-align: left;
+  text-align: center;
   cursor: pointer;
-  transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease;
+  transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
   -webkit-tap-highlight-color: transparent;
   position: relative;
-  box-shadow: 0 0 0 0 rgba(255, 85, 0, 0.0);
+  box-shadow: 0 4px 14px rgba(255, 85, 0, 0.20);
 }
 .save-template-cta:active { transform: scale(0.98); }
 .save-template-cta:hover {
-  border-color: var(--accent);
-  background: linear-gradient(180deg, rgba(255,85,0,0.18), rgba(255,85,0,0.06));
-  box-shadow: 0 4px 14px rgba(255, 85, 0, 0.18);
-}
-.save-template-cta__icon {
-  font-size: 22px;
-  line-height: 1;
-  flex-shrink: 0;
-  filter: drop-shadow(0 0 6px rgba(255, 85, 0, 0.35));
+  background: linear-gradient(180deg, rgba(255,85,0,0.26), rgba(255,85,0,0.10));
+  box-shadow: 0 6px 20px rgba(255, 85, 0, 0.30);
 }
 .save-template-cta__text {
-  flex: 1;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 800;
-  letter-spacing: 1.2px;
+  letter-spacing: 1.6px;
   text-transform: uppercase;
   color: var(--accent);
+  line-height: 1.1;
 }
 .save-template-cta__hint {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
   letter-spacing: 0.3px;
@@ -1195,8 +1189,9 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 .item-group-pill:active { opacity: 0.7; }
 
-/* Drop-set toggle pill — when on, the live workout shows a "+ Drop" button
-   on completed sets for this exercise. */
+/* Drop-set mode pill — cycles off → all → last. 'all' offers a "+ Drop"
+   button on every completed working set in the live workout; 'last' only
+   offers it on the final completed working set. */
 .item-drop-pill {
   font-size: 10px;
   font-weight: 700;
@@ -1211,6 +1206,17 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
+.item-drop-pill--all {
+  background: rgba(168, 85, 247, 0.28);
+  border-color: rgba(168, 85, 247, 0.75);
+  color: #E9D5FF;
+}
+.item-drop-pill--last {
+  background: rgba(168, 85, 247, 0.16);
+  border-color: rgba(168, 85, 247, 0.55);
+  color: #DDD6FE;
+}
+/* Legacy class — kept so any cached markup still styles correctly. */
 .item-drop-pill--on {
   background: rgba(168, 85, 247, 0.22);
   border-color: rgba(168, 85, 247, 0.60);
@@ -1277,6 +1283,80 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 .summary-pr__icon { font-size: 18px; flex-shrink: 0; }
 .summary-pr__msg { font-size: 13px; color: var(--text); line-height: 1.3; }
+
+/* Banner inside the post-workout summary that asks whether to bump the day's
+   plan when the user logged more sets than the plan called for. */
+.extra-sets-banner {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 85, 0, 0.08);
+  border: 1px solid rgba(255, 85, 0, 0.40);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.extra-sets-banner__title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.extra-sets-banner__sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.extra-sets-banner__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.extra-sets-banner__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.extra-sets-banner__name { color: var(--text); font-weight: 600; }
+.extra-sets-banner__delta { color: var(--text-muted); }
+.extra-sets-banner__delta strong { color: var(--accent); }
+.extra-sets-banner__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+.extra-sets-banner__skip {
+  flex: 1;
+  padding: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.extra-sets-banner__primary {
+  flex: 2;
+  padding: 9px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.extra-sets-banner__primary:disabled,
+.extra-sets-banner__skip:disabled { opacity: 0.55; cursor: default; }
 
 /* Single ⓘ button used at the top of a screen/modal to open a consolidated
    explainer covering the whole context. */
@@ -3339,7 +3419,9 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 
 .picker-create {
   border-top: 1px solid var(--border);
-  padding: 12px 16px env(safe-area-inset-bottom, 12px);
+  /* Bottom padding stacks the iOS safe-area inset on top of an extra 18px so
+     the primary CTA never visually merges into the phone's bottom edge. */
+  padding: 14px 16px calc(env(safe-area-inset-bottom, 0px) + 18px);
   background: var(--surface);
 }
 .picker-create-btn {
@@ -3679,22 +3761,22 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   margin: 12px 0 4px;
 }
 
-/* Subtle Save-as-template pill in the workout header (next to gear).
-   Stays muted by default; pulses to the accent on hover/active so the
-   user notices without it screaming for attention. */
+/* Save-as-template pill in the workout header (next to gear). Sits as a
+   small orange-ringed pill with a clearly-readable grey label — the orange
+   ring tells you it's an action, the grey letters keep it from competing
+   with the workout title or the gear button. */
 .header-template-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
+  padding: 5px 11px;
   margin-right: 4px;
   border-radius: 999px;
   background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
+  border: 1.5px solid var(--accent);
+  color: var(--text);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.7px;
   text-transform: uppercase;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -3704,11 +3786,9 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .header-template-pill:hover,
 .header-template-pill:active {
   color: var(--accent);
-  border-color: var(--accent);
-  background: rgba(255, 85, 0, 0.08);
+  background: rgba(255, 85, 0, 0.10);
 }
 .header-template-pill:active { transform: scale(0.97); }
-.header-template-pill__icon { font-size: 12px; line-height: 1; }
 .header-template-pill__text { line-height: 1; }
 
 /* Workout-screen header gear button + dropdown menu */

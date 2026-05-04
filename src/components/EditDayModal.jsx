@@ -174,14 +174,21 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   const setSetCount = (idx, n) =>
     updateItem(idx, { set_count: Math.max(1, Math.min(15, n)) })
 
-  const toggleDropSets = (idx) =>
+  // Cycle drop-set mode: off → all → last → off.
+  // 'all'  = the live workout shows "+ Drop" on every completed working set.
+  // 'last' = "+ Drop" only on the last completed working set.
+  const cycleDropMode = (idx) => {
+    const cycle = ['off', 'all', 'last']
     setDraft(prev => ({
       ...prev,
       exercises: prev.exercises.map((it, i) => {
         if (i !== idx || it.item_type === 'activity') return it
-        return { ...it, has_drop_sets: !it.has_drop_sets }
+        const cur = it.drop_set_mode || (it.has_drop_sets ? 'all' : 'off')
+        const next = cycle[(cycle.indexOf(cur) + 1) % cycle.length]
+        return { ...it, drop_set_mode: next, has_drop_sets: next !== 'off' }
       }),
     }))
+  }
 
   // Cycle the superset group: none → A → B → C → none.
   // Activities never get a group — only barbell/dumbbell-style exercises.
@@ -347,15 +354,24 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                         {isCheck ? 'Check' : 'Track'}
                       </button>
                     )}
-                    {!isActivity && !isCheck && (
-                      <button
-                        className={`item-drop-pill${it.has_drop_sets ? ' item-drop-pill--on' : ''}`}
-                        onClick={() => toggleDropSets(i)}
-                        title={it.has_drop_sets ? 'Drop sets enabled — tap to disable' : 'Enable drop sets for this exercise'}
-                      >
-                        {it.has_drop_sets ? '↓ Dropset' : 'Dropset'}
-                      </button>
-                    )}
+                    {!isActivity && !isCheck && (() => {
+                      const dm = it.drop_set_mode || (it.has_drop_sets ? 'all' : 'off')
+                      const label = dm === 'all'  ? '↓ Dropset · All'
+                                  : dm === 'last' ? '↓ Dropset · Last'
+                                  : 'Dropset'
+                      const title = dm === 'all'  ? 'Drop set offered on every working set — tap for last-only'
+                                  : dm === 'last' ? 'Drop set offered on the last working set only — tap to disable'
+                                  :                 'Tap to enable drop sets (all working sets)'
+                      return (
+                        <button
+                          className={`item-drop-pill item-drop-pill--${dm}`}
+                          onClick={() => cycleDropMode(i)}
+                          title={title}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })()}
                     {!isActivity && (
                       <button
                         className={`item-group-pill${it.superset_group ? ' item-group-pill--on' : ''}`}
@@ -613,6 +629,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
               superset_group:   e.superset_group || null,
               workout_block_id: block.id,
               has_drop_sets:    !!e.has_drop_sets,
+              drop_set_mode:    e.drop_set_mode || (e.has_drop_sets ? 'all' : 'off'),
             }))
             setDraft(prev => ({
               ...prev,

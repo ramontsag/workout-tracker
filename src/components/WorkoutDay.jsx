@@ -5,7 +5,7 @@ import {
   addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames,
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
   insertCompletedSession, updateCompletedSession,
-  getTemplates, getLastSetsByExercise,
+  getTemplates, getLastSetsByExercise, updateExerciseSetCount,
   getGyms, createGym, updateGym, deleteGym, setActiveGym,
 } from '../supabase'
 import GymPickerSheet from './GymPickerSheet'
@@ -164,10 +164,11 @@ function progressIndicator(sets, lastSets, unit) {
 // Shown after Complete Workout saves successfully. Surfaces total volume,
 // total reps and sets, comparison vs last session, and any PRs hit. Tap
 // Done (or backdrop) to navigate home.
-function WorkoutSummary({ summary, unit, onClose, onEdit }) {
+function WorkoutSummary({ summary, unit, onClose, onEdit, extraSetsBumps, onAcceptBumps, onDismissBumps, bumpStatus }) {
   if (!summary) return null
   const label = unitLabel(unit)
   const { totalVolKg, totalReps, totalSets, prs, volumeMsg } = summary
+  const bumps = extraSetsBumps || []
   const headline = prs.length > 0
     ? `🎉 ${prs.length} PR${prs.length === 1 ? '' : 's'} smashed!`
     : 'Workout complete 💪'
@@ -215,6 +216,34 @@ function WorkoutSummary({ summary, unit, onClose, onEdit }) {
                 </div>
               )
             })}
+          </div>
+        )}
+        {bumps.length > 0 && (
+          <div className="extra-sets-banner">
+            <div className="extra-sets-banner__title">Save extra sets to plan?</div>
+            <div className="extra-sets-banner__sub">
+              You logged more sets than the day's plan calls for. Update the plan so next workout starts with these counts.
+            </div>
+            <ul className="extra-sets-banner__list">
+              {bumps.map(b => (
+                <li key={b.id} className="extra-sets-banner__item">
+                  <span className="extra-sets-banner__name">{b.name}</span>
+                  <span className="extra-sets-banner__delta">{b.planned} → <strong>{b.actual}</strong> sets</span>
+                </li>
+              ))}
+            </ul>
+            <div className="extra-sets-banner__actions">
+              <button
+                className="extra-sets-banner__skip"
+                onClick={onDismissBumps}
+                disabled={bumpStatus === 'saving'}
+              >Not now</button>
+              <button
+                className="extra-sets-banner__primary"
+                onClick={onAcceptBumps}
+                disabled={bumpStatus === 'saving'}
+              >{bumpStatus === 'saving' ? 'Saving…' : 'Update plan'}</button>
+            </div>
           </div>
         )}
         <div className="modal-actions">
@@ -268,7 +297,15 @@ function ExerciseCard({
   exercise, sets, lastSets, prInfo, unit, intensityMode,
   onUpdate, onConfirm, onAdd, onHistory, onToggleWarmup,
   onRemoveExercise, onCopyLast, onAddDrop, onFocusWeight,
+  dropMode = 'off',
 }) {
+  // For dropMode='last' we only surface "+ Drop" on the LAST completed working
+  // set, so the user only ever drops from the heaviest/final set. 'all' shows
+  // it on every completed working set.
+  let lastWorkingDoneIdx = -1
+  ;(sets || []).forEach((s, i) => {
+    if (s && s.done && !s.is_warmup && !s.is_drop_set) lastWorkingDoneIdx = i
+  })
   const prog = progressIndicator(sets, lastSets, unit)
   const label = unitLabel(unit)
   const lastSummary = lastSets.length > 0
@@ -397,8 +434,14 @@ function ExerciseCard({
                   {prev.is_warmup && <span className="set-prev-warmup"> (warmup)</span>}
                 </div>
               )}
-              {/* + Drop appears after any ticked non-warmup set so chains are easy. */}
-              {set.done && !set.is_warmup && onAddDrop && (
+              {/* + Drop placement depends on the exercise's drop_set_mode:
+                    'all'  → every completed working set offers it,
+                    'last' → only the last completed working set offers it,
+                    'off'  → never (onAddDrop is undefined). */}
+              {set.done && !set.is_warmup && !isDrop && onAddDrop && (
+                dropMode === 'all' ||
+                (dropMode === 'last' && idx === lastWorkingDoneIdx)
+              ) && (
                 <button
                   className="add-drop-btn"
                   onClick={() => onAddDrop(idx)}
@@ -737,6 +780,15 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   const [editingCompleted, setEditingCompleted] = useState(false)
   // Post-workout summary modal payload. null = hidden.
   const [summary, setSummary] = useState(null)
+  // List of exercises whose actual working-set count exceeded the planned
+  // set_count. Surfaces a "Save extra sets to plan?" banner inside the
+  // summary modal so the user can promote a one-off bump into the blueprint.
+  // Shape: [{ id, name, planned, actual }]
+  const [extraSetsBumps, setExtraSetsBumps] = useState([])
+  // Tracks ids the user has already accepted/dismissed in this session so the
+  // banner doesn't flicker if they re-open the summary.
+  const [bumpResolved, setBumpResolved] = useState({})
+  const [bumpStatus, setBumpStatus] = useState('idle') // idle | saving | done
   // Hydrates from the block's persisted setting (DB default true).
   const [timerEnabled, setTimerEnabled] = useState(() => block?.timer_enabled ?? true)
   const restSeconds = block?.rest_seconds ?? day.rest_seconds ?? 90
@@ -1580,6 +1632,28 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         volumeMsg:  msg,
       })
 
+      // "Save extra sets to plan?" — for any exercise where the user logged
+      // more *valid* working sets than the planned set_count, offer to bump
+      // the plan so next workout reflects this. Empty rows aren't counted —
+      // the user must have actually used the extra set (weight × reps).
+      const bumps = []
+      for (const ex of exerciseItems) {
+        if (ex.track_mode === 'check') continue
+        const arr = sets[ex.name] || []
+        let actual = 0
+        for (const s of arr) {
+          if (s.is_warmup || s.is_drop_set) continue
+          const w = parseInputWeight(s.weight, unit)
+          const r = parseInt(s.reps)
+          if ((!isNaN(w) && w > 0) || (!isNaN(r) && r > 0) || s.done) actual += 1
+        }
+        const planned = Math.max(1, ex.set_count ?? 2)
+        if (actual > planned && ex.id) {
+          bumps.push({ id: ex.id, name: ex.name, planned, actual })
+        }
+      }
+      setExtraSetsBumps(bumps)
+
       // Workout is done — tear down the draft so we don't resume into an
       // already-saved session.
       clearLsDraft(lsKey)
@@ -1689,7 +1763,6 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
               onClick={handleArchiveTrigger}
               title="Save this workout's structure as a reusable template"
             >
-              <span className="header-template-pill__icon" aria-hidden="true">⭐</span>
               <span className="header-template-pill__text">Template</span>
             </button>
           )}
@@ -1826,7 +1899,12 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                 onToggleWarmup={idx => toggleWarmup(item.name, idx)}
                 onCopyLast={() => copyLastSets(item.name)}
                 onFocusWeight={idx => focusWeightInput(item.name, idx)}
-                onAddDrop={item.has_drop_sets ? (idx) => addDropSet(item.name, idx) : undefined}
+                dropMode={item.drop_set_mode || (item.has_drop_sets ? 'all' : 'off')}
+                onAddDrop={
+                  (item.drop_set_mode && item.drop_set_mode !== 'off') || item.has_drop_sets
+                    ? (idx) => addDropSet(item.name, idx)
+                    : undefined
+                }
               />
             )
           }
@@ -1870,7 +1948,6 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
             onClick={handleArchiveTrigger}
             title="Save this workout's structure as a reusable template"
           >
-            <span className="save-template-cta__icon" aria-hidden="true">⭐</span>
             <span className="save-template-cta__text">Save as template</span>
             <span className="save-template-cta__hint">Reuse the structure on any day</span>
           </button>
@@ -2243,13 +2320,46 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       <WorkoutSummary
         summary={summary}
         unit={unit}
+        extraSetsBumps={extraSetsBumps}
+        bumpStatus={bumpStatus}
+        onAcceptBumps={async () => {
+          if (!extraSetsBumps.length) return
+          setBumpStatus('saving')
+          try {
+            await Promise.all(
+              extraSetsBumps.map(b => updateExerciseSetCount(b.id, b.actual, userId))
+            )
+            // Mark each bump's row as resolved so a re-opened summary stays clean.
+            setBumpResolved(prev => extraSetsBumps.reduce(
+              (acc, b) => { acc[b.id] = true; return acc },
+              { ...prev }
+            ))
+            setExtraSetsBumps([])
+            setBumpStatus('done')
+            if (onProgramUpdated) onProgramUpdated()
+          } catch {
+            // Surface failure but don't block dismissal — they can edit the day later.
+            setBumpStatus('idle')
+          }
+        }}
+        onDismissBumps={() => {
+          setBumpResolved(prev => extraSetsBumps.reduce(
+            (acc, b) => { acc[b.id] = true; return acc },
+            { ...prev }
+          ))
+          setExtraSetsBumps([])
+        }}
         onClose={() => {
           setSummary(null)
+          setExtraSetsBumps([])
+          setBumpStatus('idle')
           if (onCompleteHome) onCompleteHome()
           else if (onBack) onBack()
         }}
         onEdit={() => {
           setSummary(null)
+          setExtraSetsBumps([])
+          setBumpStatus('idle')
           setEditingCompleted(true)
           setWorkoutDoneAt(null)
           setStatus('idle')

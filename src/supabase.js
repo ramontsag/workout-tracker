@@ -308,6 +308,7 @@ export async function getProgram() {
           superset_group:   e.superset_group || null,
           workout_block_id: e.workout_block_id || null,
           has_drop_sets:    !!e.has_drop_sets,
+          drop_set_mode:    e.drop_set_mode || (e.has_drop_sets ? 'all' : 'off'),
         }
       })
 
@@ -480,7 +481,8 @@ export async function saveProgram(days, uid) {
           : null,
         superset_group:   ex.item_type === 'exercise' ? (ex.superset_group || null) : null,
         workout_block_id: ex.item_type === 'exercise' ? (ex.workout_block_id || null) : null,
-        has_drop_sets:    ex.item_type === 'exercise' ? !!ex.has_drop_sets : false,
+        has_drop_sets:    ex.item_type === 'exercise' ? (ex.drop_set_mode ? ex.drop_set_mode !== 'off' : !!ex.has_drop_sets) : false,
+        drop_set_mode:    ex.item_type === 'exercise' ? (ex.drop_set_mode || (ex.has_drop_sets ? 'all' : 'off')) : 'off',
       })
     )
   }
@@ -890,6 +892,23 @@ export async function getInProgressDayIds(uid) {
   )
   if (error) throw new Error(`Load drafts failed: ${error.message}`)
   return new Set((data || []).map(r => r.training_day_id))
+}
+
+// Bump (or shrink) the planned set_count on a single exercise row. Used by
+// the post-workout "Save extra sets to plan?" banner so adding a set live
+// can also propagate into the day's blueprint without a full saveProgram.
+// Restricted to the row's owner (user_id) so RLS still applies.
+export async function updateExerciseSetCount(exerciseId, setCount, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  if (!exerciseId) throw new Error('No exercise id')
+  const n = Math.max(1, Math.min(15, Number(setCount) || 1))
+  const { error } = await withTimeout(
+    supabase.from('exercises').update({ set_count: n })
+      .eq('id', exerciseId)
+      .eq('user_id', uid),
+    5000, 'Update set_count'
+  )
+  if (error) throw new Error(`Update set count failed: ${error.message}`)
 }
 
 // Add a single exercise row to an existing training day. Used by the mid-
