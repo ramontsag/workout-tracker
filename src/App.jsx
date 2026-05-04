@@ -8,6 +8,7 @@ import ExerciseHistory from './components/ExerciseHistory'
 import ProfileScreen   from './components/ProfileScreen'
 import ProgressScreen  from './components/ProgressScreen'
 import ArchivesScreen  from './components/ArchivesScreen'
+import HistoryScreen   from './components/HistoryScreen'
 import SettingsScreen  from './components/SettingsScreen'
 import FloatingTimer   from './components/FloatingTimer'
 import { stop as stopRestTimer } from './restTimerStore'
@@ -220,7 +221,30 @@ export default function App() {
           onBack={() => go('home')}
           onProgress={() => go('progress')}
           onArchives={() => go('archives')}
+          onHistory={() => go('history-list')}
           onSettings={() => go('settings')}
+        />
+      )
+    }
+
+    if (screen === 'history-list') {
+      return (
+        <HistoryScreen
+          user={user}
+          profile={profile}
+          program={program}
+          onBack={() => go('profile')}
+          onViewSession={({ workoutId, dayId, blockId }) => {
+            const day = program.find(d => d.id === dayId)
+            if (!day) return
+            const block = blockId
+              ? (day.workout_blocks || []).find(b => b.id === blockId) || null
+              : null
+            setActiveDay(day)
+            setActiveBlock(block)
+            setEditingCompletedId(workoutId)
+            go('workout')
+          }}
         />
       )
     }
@@ -242,17 +266,6 @@ export default function App() {
           program={program}
           onBack={() => go('profile')}
           onProgramUpdated={refreshProgram}
-          onViewSession={({ workoutId, dayId, blockId }) => {
-            const day = program.find(d => d.id === dayId)
-            if (!day) return
-            const block = blockId
-              ? (day.workout_blocks || []).find(b => b.id === blockId) || null
-              : null
-            setActiveDay(day)
-            setActiveBlock(block)
-            setEditingCompletedId(workoutId)
-            go('workout')
-          }}
         />
       )
     }

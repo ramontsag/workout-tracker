@@ -2962,31 +2962,86 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   font-size: 12px;
   color: var(--text-muted);
 }
-.archive-card-last {
+/* HistoryScreen — one card per template, showing the last session's
+   summary stats (volume / sets / reps) and an "Open & edit" button that
+   deep-links into WorkoutDay's edit-completed mode for that workout id. */
+.history-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.history-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.history-card__name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+.history-card__when {
   font-size: 11px;
   color: var(--accent);
-  font-weight: 600;
-  letter-spacing: 0.3px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  flex-shrink: 0;
 }
-.archive-history-btn {
-  margin-top: 12px;
-  width: 100%;
-  padding: 10px 12px;
-  background: transparent;
-  color: var(--text);
+.history-card__stats {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.history-card__stat {
+  flex: 1;
+  background: var(--surface2);
   border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 8px;
+  text-align: center;
+}
+.history-card__stat-val {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+  font-family: var(--font-display);
+  line-height: 1.1;
+}
+.history-card__stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.history-card__edit {
+  width: 100%;
+  padding: 11px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
   border-radius: var(--radius-sm);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: border-color 0.15s, color 0.15s;
 }
-.archive-history-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+.history-card__edit:active { opacity: 0.85; }
+.history-card__empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
 }
-.archive-history-btn:active { opacity: 0.8; }
 .archive-card-chevron {
   font-size: 11px;
   color: var(--text-muted);

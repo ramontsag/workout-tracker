@@ -49,7 +49,7 @@ function measurementsSummary(last, unit) {
   return parts
 }
 
-export default function ProfileScreen({ user, totalWorkouts, totalActivities, onBack, onProgress, onArchives, onSettings }) {
+export default function ProfileScreen({ user, totalWorkouts, totalActivities, onBack, onProgress, onArchives, onHistory, onSettings }) {
   const [profile,        setProfile]       = useState(null)
   const [signingOut,     setSigningOut]    = useState(false)
   const [weeklyTarget,   setWeeklyTarget]  = useState(4)
@@ -300,6 +300,15 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
             <span className="profile-action-text">
               <span className="profile-action-title">Saved Workouts</span>
               <span className="profile-action-sub">Your saved workout plans</span>
+            </span>
+            <span className="profile-action-chevron">›</span>
+          </button>
+
+          <button className="profile-action-btn" style={{ marginTop: 8 }} onClick={onHistory}>
+            <span className="profile-action-icon">📜</span>
+            <span className="profile-action-text">
+              <span className="profile-action-title">History</span>
+              <span className="profile-action-sub">Last session of each template</span>
             </span>
             <span className="profile-action-chevron">›</span>
           </button>
