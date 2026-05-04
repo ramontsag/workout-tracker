@@ -890,12 +890,28 @@ export async function updateCompletedSession(
     })
   }
 
-  // Wipe old rows then insert new ones. RLS scopes both to this user.
-  const { error: dErr } = await withTimeout(
-    supabase.from('workout_sets').delete().eq('workout_id', workoutId).eq('user_id', uid),
-    5000, 'Wipe old sets'
-  )
-  if (dErr) throw new Error(`Wipe old sets failed: ${dErr.message}`)
+  // Scoped wipe: only delete rows for exercise_names the caller is managing.
+  // The caller passes the full set of in-scope names via the keys of
+  // exerciseSets (and activityName for activity sessions), so:
+  //   - rows for names IN scope are wiped then reinserted from the new payload
+  //     (this preserves the "clear all sets for X" intent — empty payload =
+  //      keep the wipe but skip the insert)
+  //   - rows for names OUT of scope (e.g. a historical exercise no longer in
+  //     the current edit view) are left untouched
+  // Without this scoping, deep-linking into an old workout via Archives and
+  // tapping Save would silently delete every set whose name isn't visible.
+  const inScopeNames = persistExercises
+    ? Object.keys(exerciseSets || {})
+    : (activityName ? [activityName] : [])
+  if (inScopeNames.length) {
+    const { error: dErr } = await withTimeout(
+      supabase.from('workout_sets').delete()
+        .eq('workout_id', workoutId).eq('user_id', uid)
+        .in('exercise_name', inScopeNames),
+      5000, 'Wipe old sets'
+    )
+    if (dErr) throw new Error(`Wipe old sets failed: ${dErr.message}`)
+  }
 
   if (rowsToInsert.length) {
     const { error: iErr } = await withTimeout(
