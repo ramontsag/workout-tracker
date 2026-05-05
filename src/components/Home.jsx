@@ -386,7 +386,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                       day was overridden. */}
                   {offScheduleActual.length > 0 && (
                     <div className="day-card__actual">
-                      <span className="day-card__actual-label">Did</span>
+                      <span className="day-card__actual-label" aria-label="Actually did">↳</span>
                       {offScheduleActual.map((a, k) => (
                         <span
                           key={k}
