@@ -849,7 +849,14 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   // and the Supabase resume effect only fires for cross-device pickup.
   const [draftLoaded, setDraftLoaded] = useState(!!cached)
   const [resumeBanner, setResumeBanner] = useState(null)  // { startedAt } | null  (silent resume notice)
-  const [resumePrompt, setResumePrompt] = useState(null)  // { draftId, draftState, startedAt } | null  (>12h)
+  const [resumePrompt, setResumePrompt] = useState(null)  // { draftId, draftState, startedAt, gymId } | null  (>12h)
+  // Discard guard — keep the dialog open and show the error if the DB delete
+  // fails, so we never silently lose state out of sync with the server.
+  const [discarding, setDiscarding]     = useState(false)
+  const [discardError, setDiscardError] = useState('')
+  // Same pattern for the gear-menu Cancel-workout flow.
+  const [cancelling, setCancelling]     = useState(false)
+  const [cancelError, setCancelError]   = useState('')
 
   // Mid-workout add/remove UI state
   const [pickerKind,    setPickerKind]    = useState(null)  // null | 'exercise' | 'activity'
@@ -1028,6 +1035,7 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
             draftId:    draft.id,
             draftState: draft.draft_state,
             startedAt:  draft.started_at,
+            gymId:      draft.gym_id,
           })
         } else {
           applyDraft(draft)
@@ -1044,8 +1052,47 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   function applyDraft(draft) {
     const ds = draft.draft_state || {}
     if (Array.isArray(ds.exerciseList)) setExerciseList(ds.exerciseList)
-    if (ds.sets         && typeof ds.sets         === 'object') setSets(ds.sets)
-    if (ds.activityLogs && typeof ds.activityLogs === 'object') setActivityLogs(ds.activityLogs)
+    // If the draft was typed in a different unit (e.g. user logged in kg,
+    // switched profile to lb between sessions, then resumed), convert each
+    // weight string before applying. Same for distance / elevation. Without
+    // this, "60" typed in kg would silently render as 60 lb on resume.
+    const draftUnit = ds.unit || unit
+    if (ds.sets && typeof ds.sets === 'object') {
+      if (draftUnit === unit) {
+        setSets(ds.sets)
+      } else {
+        const converted = {}
+        for (const [name, arr] of Object.entries(ds.sets)) {
+          converted[name] = (arr || []).map(s => {
+            if (!s || s.weight === '' || s.weight == null) return s
+            const kg = parseInputWeight(s.weight, draftUnit)
+            if (isNaN(kg)) return s
+            return { ...s, weight: displayWeight(kg, unit), weight_autofill: false }
+          })
+        }
+        setSets(converted)
+      }
+    }
+    if (ds.activityLogs && typeof ds.activityLogs === 'object') {
+      if (draftUnit === unit) {
+        setActivityLogs(ds.activityLogs)
+      } else {
+        const converted = {}
+        for (const [name, log] of Object.entries(ds.activityLogs)) {
+          const next = { ...log }
+          if (next.distance_display !== '' && next.distance_display != null) {
+            const km = parseInputDistance(next.distance_display, draftUnit)
+            if (!isNaN(km)) next.distance_display = displayDistance(km, unit)
+          }
+          if (next.elevation_display !== '' && next.elevation_display != null) {
+            const m = parseInputElevation(next.elevation_display, draftUnit)
+            if (!isNaN(m)) next.elevation_display = displayElevation(m, unit)
+          }
+          converted[name] = next
+        }
+        setActivityLogs(converted)
+      }
+    }
     setWorkoutId(draft.id)
     setDraftLoaded(true)
     // Resuming an in-progress workout: skip the Start prompt and adopt the
@@ -1302,7 +1349,11 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         // race ahead of Start). Existing drafts ignore this field — gym is
         // pinned at creation, never overwritten by later autosaves.
         gymId:          stampedGymId ?? activeGymId,
-        draftState:     { sets: s, activityLogs: a, exerciseList: el },
+        // `unit` records the kg/lb the user typed in. applyDraft uses it on
+        // resume to convert weights if the profile unit changed in the
+        // interim — without this, "60" typed in kg would be reinterpreted as
+        // 60 lb after switching units.
+        draftState:     { sets: s, activityLogs: a, exerciseList: el, unit },
       }, userId)
       if (!workoutIdRef.current && result?.id) {
         workoutIdRef.current = result.id
@@ -1668,7 +1719,7 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           workoutBlockId: blockId,
           dayLabel,
           gymId:          stampedGymId ?? activeGymId,
-          draftState:     { sets, activityLogs, exerciseList },
+          draftState:     { sets, activityLogs, exerciseList, unit },
         }, userId)
         if (draft?.id) {
           workoutIdRef.current = draft.id
@@ -2308,37 +2359,50 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
 
       {/* ── Cancel workout confirmation ─────────────────────── */}
       {confirmCancel && (
-        <div className="modal-backdrop" onClick={() => setConfirmCancel(false)}>
+        <div className="modal-backdrop" onClick={() => !cancelling && setConfirmCancel(false)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
             <h3 className="modal-title">Cancel workout?</h3>
             <p className="modal-body">
               Anything you've logged in this session will be discarded. This can't be undone.
             </p>
+            {cancelError && <div className="err-msg" style={{ marginBottom: 8 }}>{cancelError}</div>}
             <div className="modal-actions">
               <button
                 className="modal-btn-danger"
+                disabled={cancelling}
                 onClick={async () => {
-                  setConfirmCancel(false)
-                  clearLsDraft(lsKey)
-                  if (workoutIdRef.current) {
-                    try { await discardDraft(workoutIdRef.current, userId) } catch {}
+                  // DB delete first — only clear local indicators (LS draft,
+                  // active-workout lock, rest timer) once the row is actually
+                  // gone. A network failure used to leave the DB row alive
+                  // while local state said "cancelled," so the next visit
+                  // would re-prompt to resume the cancelled workout.
+                  setCancelling(true)
+                  setCancelError('')
+                  try {
+                    if (workoutIdRef.current) {
+                      await discardDraft(workoutIdRef.current, userId)
+                    }
+                    clearLsDraft(lsKey)
+                    setWorkoutStartedAt(null)
+                    restTimer.stop()
+                    const existing = getActiveWorkout()
+                    if (existing.active && existing.dayId === day.id && existing.blockId === blockId) {
+                      clearActiveWorkout()
+                    }
+                    setConfirmCancel(false)
+                    onBack()
+                  } catch (e) {
+                    setCancelError(e?.message || 'Cancel failed — try again.')
+                  } finally {
+                    setCancelling(false)
                   }
-                  setWorkoutStartedAt(null)
-                  // Stop the rest timer too — the floating pill is global, so
-                  // it survived navigation otherwise. Cancelling means
-                  // everything from this session goes away.
-                  restTimer.stop()
-                  // Release the active-workout lock if this is the active one.
-                  const existing = getActiveWorkout()
-                  if (existing.active && existing.dayId === day.id && existing.blockId === blockId) {
-                    clearActiveWorkout()
-                  }
-                  onBack()
                 }}
-              >Cancel workout</button>
-              <button className="modal-btn-cancel" onClick={() => setConfirmCancel(false)}>
-                Keep going
-              </button>
+              >{cancelling ? 'Cancelling…' : 'Cancel workout'}</button>
+              <button
+                className="modal-btn-cancel"
+                disabled={cancelling}
+                onClick={() => setConfirmCancel(false)}
+              >Keep going</button>
             </div>
           </div>
         </div>
@@ -2354,11 +2418,21 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                 weekday: 'short', hour: 'numeric', minute: '2-digit',
               })} but didn't finish. Resume where you left off, or discard?
             </p>
+            {discardError && <div className="err-msg" style={{ marginBottom: 8 }}>{discardError}</div>}
             <div className="modal-actions">
               <button
                 className="modal-btn-primary"
                 onClick={() => {
-                  applyDraft({ id: resumePrompt.draftId, draft_state: resumePrompt.draftState })
+                  // Forward started_at + gym_id so applyDraft can rehydrate
+                  // the duration timer + floating pill + gym stamp. Without
+                  // these, a >12h-resumed workout would render with the
+                  // duration counter and Cancel option both invisible.
+                  applyDraft({
+                    id:         resumePrompt.draftId,
+                    draft_state: resumePrompt.draftState,
+                    started_at: resumePrompt.startedAt,
+                    gym_id:     resumePrompt.gymId,
+                  })
                   setResumeBanner({ startedAt: resumePrompt.startedAt })
                   setResumePrompt(null)
                 }}
@@ -2366,12 +2440,24 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
               <button
                 className="modal-btn-danger"
                 onClick={async () => {
-                  clearLsDraft(lsKey)
-                  try { await discardDraft(resumePrompt.draftId, userId) } catch {}
-                  setResumePrompt(null)
-                  setDraftLoaded(true)
+                  // DB delete first — only clear local state once we're sure
+                  // the row is gone, otherwise a network failure would leave
+                  // an in-progress row in the DB while the local state says
+                  // "discarded," and the next visit would re-prompt to resume.
+                  setDiscarding(true)
+                  try {
+                    await discardDraft(resumePrompt.draftId, userId)
+                    clearLsDraft(lsKey)
+                    setResumePrompt(null)
+                    setDraftLoaded(true)
+                  } catch (e) {
+                    setDiscardError(e?.message || 'Discard failed — try again.')
+                  } finally {
+                    setDiscarding(false)
+                  }
                 }}
-              >Discard</button>
+                disabled={discarding}
+              >{discarding ? 'Discarding…' : 'Discard'}</button>
             </div>
           </div>
         </div>
