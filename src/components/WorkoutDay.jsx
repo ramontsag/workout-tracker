@@ -2391,6 +2391,7 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           createLabel={pickerKind === 'activity' ? '+ Create your own activity' : '+ Create your own exercise'}
           createPlaceholder={pickerKind === 'activity' ? 'Activity name' : 'Exercise name'}
           yourGroupLabel={pickerKind === 'activity' ? 'Your activities' : 'Your exercises'}
+          kind={pickerKind === 'activity' ? 'activity' : 'workout'}
           onDeleteCustom={async (name) => {
             await deleteCustomItem(name, userId)
             const setter = pickerKind === 'activity' ? setKnownActivityNames : setKnownExerciseNames

@@ -30,6 +30,9 @@ export default function CatalogPickerModal({
   createPlaceholder = 'Name',
   yourGroupLabel    = 'Your items',
   onDeleteCustom    = null,
+  // 'workout' (orange) or 'activity' (cyan) — themes the Create button so
+  // it matches the kind of catalog we're picking from.
+  kind              = 'workout',
 }) {
   const [query, setQuery] = useState('')
   const [openGroup, setOpenGroup] = useState(null)
@@ -131,7 +134,10 @@ export default function CatalogPickerModal({
             obviously available and never gets buried below long catalogs. */}
         <div className="picker-create-top">
           {creatingName === null ? (
-            <button className="picker-create-btn-alt" onClick={() => setCreatingName(query)}>
+            <button
+              className={`picker-create-btn-alt picker-create-btn-alt--${kind}`}
+              onClick={() => setCreatingName(query)}
+            >
               {createLabel}
             </button>
           ) : (

@@ -513,6 +513,7 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
           createLabel="+ Create your own activity"
           createPlaceholder="Activity name"
           yourGroupLabel="Your activities"
+          kind="activity"
           onDeleteCustom={async (name) => {
             await deleteCustomItem(name, userId)
             setKnownNames(prev => prev.filter(n => n.toLowerCase() !== name.toLowerCase()))

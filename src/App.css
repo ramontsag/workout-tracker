@@ -1835,18 +1835,61 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .week-card-sub      { font-size: 15px; font-weight: 500; color: var(--text); line-height: 1.4; }
 .week-card-sub--done { color: var(--success); }
 
-/* Ring SVG */
-.ring-svg   { flex-shrink: 0; }
-.ring-count {
-  font-size: 22px;
-  font-weight: 700;
-  fill: var(--text);
-  font-family: var(--font-display);
+/* ── Energy ring (weekly target) ──────────────────────
+   Multi-layer SVG ring with gradient arc, leading-edge dot, halo glow on
+   completion, and HUD-style numerals. The arc transitions smoothly when
+   `completed` changes so completing a session feels animated, not jumpy. */
+.energy-ring { flex-shrink: 0; display: block; overflow: visible; }
+.energy-ring__halo {
+  opacity: 0;
+  transform-origin: center;
+  transform-box: fill-box;
+  transition: opacity 600ms ease;
 }
-.ring-sub {
-  font-size: 11px;
+.energy-ring--done .energy-ring__halo,
+.energy-ring--over .energy-ring__halo {
+  opacity: 1;
+  animation: energyHaloPulse 2.6s ease-in-out infinite;
+}
+@keyframes energyHaloPulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.96); }
+  50%      { opacity: 1;    transform: scale(1.04); }
+}
+.energy-ring__arc {
+  transition: stroke-dashoffset 700ms cubic-bezier(0.22, 1, 0.36, 1);
+  filter: drop-shadow(0 0 4px rgba(255, 140, 80, 0.45));
+}
+.energy-ring--done .energy-ring__arc {
+  filter: drop-shadow(0 0 6px rgba(0, 194, 168, 0.55));
+}
+.energy-ring--over .energy-ring__arc {
+  filter: drop-shadow(0 0 8px rgba(255, 184, 0, 0.6));
+}
+.energy-ring__tip {
+  filter: drop-shadow(0 0 4px rgba(255, 140, 80, 0.85));
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: energyDotPulse 1.6s ease-in-out infinite;
+}
+@keyframes energyDotPulse {
+  0%, 100% { transform: scale(1);   opacity: 0.85; }
+  50%      { transform: scale(1.3); opacity: 1; }
+}
+.energy-ring__count {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  fill: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+}
+.energy-ring__sub {
+  font-family: var(--font-display);
+  font-size: 10px;
   fill: var(--text-muted);
-  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1.5px;
+  font-weight: 700;
 }
 
 /* ── Weekly target stepper (Profile) ──────────────── */
@@ -3692,9 +3735,6 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .picker-create-btn-alt {
   width: 100%;
   padding: 10px;
-  background: rgba(255, 85, 0, 0.10);
-  color: var(--accent);
-  border: 1px dashed rgba(255, 85, 0, 0.55);
   border-radius: 8px;
   font-size: 13px;
   font-weight: 700;
@@ -3702,9 +3742,19 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, border-color 0.15s;
+  /* Defaults match exercise/orange — the activity variant overrides below. */
+  background: rgba(255, 85, 0, 0.10);
+  color: var(--accent);
+  border: 1px dashed rgba(255, 85, 0, 0.55);
 }
 .picker-create-btn-alt:active { opacity: 0.85; }
-.picker-create-btn-alt:hover  { background: rgba(255, 85, 0, 0.16); }
+.picker-create-btn-alt--workout:hover  { background: rgba(255, 85, 0, 0.16); }
+.picker-create-btn-alt--activity {
+  background: rgba(0, 194, 168, 0.10);
+  color: var(--cyan);
+  border-color: rgba(0, 194, 168, 0.55);
+}
+.picker-create-btn-alt--activity:hover { background: rgba(0, 194, 168, 0.18); }
 .picker-create-btn {
   width: 100%;
   padding: 12px;

@@ -73,7 +73,11 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   // per-block "Save as template" chip is disabled while dirty so the template
   // never captures the unsaved working copy (audit M5).
   const [openSnapshot, setOpenSnapshot] = useState(() => JSON.stringify(cloneDay(day)))
-  const isDirty = JSON.stringify(draft) !== openSnapshot
+  // Form is "dirty" if the draft diverges from the snapshot OR if any
+  // destructive op has been staged for Save Changes (block delete, custom
+  // delete). Both must enable the Save button — staged deletes alone
+  // don't always alter the visible draft.
+  const draftDirty = JSON.stringify(draft) !== openSnapshot
   const [pickerKind, setPickerKind] = useState(null)  // null | 'exercise' | 'activity'
   // Which block the rest picker is editing. null = closed.
   const [restPickerBlockId, setRestPickerBlockId] = useState(null)
@@ -88,12 +92,24 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   // (or activity picker, which has no block).
   const [pickerBlockId, setPickerBlockId] = useState(null)
   const [builderOpen, setBuilderOpen]     = useState(false)
+  // Pending DB ops that only commit when the user presses Save Changes.
+  // Closing the modal (× or backdrop) discards them silently — every
+  // mutation in this sheet flows through Save Changes, no exceptions.
+  const [pendingBlockDeletes,  setPendingBlockDeletes]  = useState([]) // block ids
+  const [pendingCustomDeletes, setPendingCustomDeletes] = useState([]) // names
+  // True whenever there's something to commit — either the visible draft
+  // diverged from the snapshot or a staged DB op is queued. The Save button
+  // and "Save day first" gating both depend on this.
+  const isDirty = draftDirty || pendingBlockDeletes.length > 0 || pendingCustomDeletes.length > 0
 
   useEffect(() => {
     if (open) {
       const fresh = cloneDay(day)
       setDraft(fresh)
       setOpenSnapshot(JSON.stringify(fresh))
+      setPendingBlockDeletes([])
+      setPendingCustomDeletes([])
+      setError('')
     }
   }, [open, day])
 
@@ -258,25 +274,21 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     }
   }
 
-  const handleDeleteBlock = async (block) => {
+  const handleDeleteBlock = (block) => {
     if (!block?.id) return
-    if (!window.confirm(`Delete "${block.name}" and all its exercises?`)) return
-    try {
-      await deleteWorkoutBlock(block.id, userId)
-      // Stop a running rest timer if it was tracking this block — otherwise
-      // the floating pill would point at a deleted workout.
-      if (getRestTimerState().blockId === block.id) stopRestTimer()
-      // Drop the block's exercises from the local draft so the UI updates
-      // before the parent refresh comes back.
-      setDraft(prev => ({
-        ...prev,
-        exercises: prev.exercises.filter(e => e.workout_block_id !== block.id),
-        workout_blocks: (prev.workout_blocks || []).filter(b => b.id !== block.id),
-      }))
-      onSaved?.()
-    } catch (e) {
-      setError(e.message)
-    }
+    if (!window.confirm(`Delete "${block.name}" and all its exercises? This will be applied when you press Save changes.`)) return
+    // Stop a running rest timer if it was tracking this block — otherwise the
+    // floating pill would still point at a workout the user has marked for
+    // deletion.
+    if (getRestTimerState().blockId === block.id) stopRestTimer()
+    // Stage the deletion + remove the block from the visible draft. Actual
+    // DB delete happens in handleSave when the user commits.
+    setPendingBlockDeletes(prev => prev.includes(block.id) ? prev : [...prev, block.id])
+    setDraft(prev => ({
+      ...prev,
+      exercises: prev.exercises.filter(e => e.workout_block_id !== block.id),
+      workout_blocks: (prev.workout_blocks || []).filter(b => b.id !== block.id),
+    }))
   }
 
   const handleSave = async () => {
@@ -284,14 +296,29 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     setSaving(true)
     setError('')
     try {
-      // 1) Persist per-block edits (name, rest_seconds). Diff against the
-      //    original day so we only patch what actually changed.
+      // 0) Apply staged block deletions first — cascades drop their exercises,
+      //    which is fine because saveProgram below re-deletes/inserts the
+      //    day's exercises anyway.
+      for (const id of pendingBlockDeletes) {
+        await deleteWorkoutBlock(id, userId)
+      }
+
+      // 0b) Apply staged custom-item deletions. Best-effort: if a row already
+      //     vanished (e.g. user removed it from a different day in another
+      //     tab), don't block the rest of the save.
+      for (const name of pendingCustomDeletes) {
+        try { await deleteCustomItem(name, userId) } catch { /* tolerate */ }
+      }
+
+      // 1) Persist per-block edits (name, rest_seconds). Skip blocks marked
+      //    for deletion — they're already gone above.
       const originalById = Object.fromEntries(
         (day.workout_blocks || []).map(b => [b.id, b])
       )
       const blockUpdates = []
       for (const b of (draft.workout_blocks || [])) {
         if (!b.id) continue
+        if (pendingBlockDeletes.includes(b.id)) continue
         const orig = originalById[b.id] || {}
         const fields = {}
         if ((b.name || '').trim() !== (orig.name || '').trim()) {
@@ -310,6 +337,10 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
       //    full program, with this day's edits merged in.
       const merged = program.map(d => d.id === day.id ? { ...draft } : d)
       await saveProgram(merged, userId)
+      // Clear staging so the modal closes in a clean state — important for
+      // "Save day first" gating on the template chip.
+      setPendingBlockDeletes([])
+      setPendingCustomDeletes([])
       await onSaved?.()
       onClose()
     } catch (e) {
@@ -606,8 +637,11 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
           createLabel={pickerCreate}
           createPlaceholder={pickerKind === 'activity' ? 'Activity name' : 'Exercise name'}
           yourGroupLabel={pickerYour}
+          kind={pickerKind === 'activity' ? 'activity' : 'workout'}
           onDeleteCustom={async (name) => {
-            await deleteCustomItem(name, userId)
+            // Stage only — the actual DB delete runs in handleSave so closing
+            // the modal without saving cleanly reverts the change.
+            setPendingCustomDeletes(prev => prev.includes(name) ? prev : [...prev, name])
             const setter = pickerKind === 'activity' ? setKnownActivityNames : setKnownExerciseNames
             setter(prev => prev.filter(n => n.toLowerCase() !== name.toLowerCase()))
             setDraft(prev => ({ ...prev, exercises: prev.exercises.filter(e => e.name !== name) }))

@@ -18,58 +18,81 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-// ── Completion ring ───────────────────────────────────────────
-function CompletionRing({ completed, target }) {
-  const SIZE = 76, CX = 38, R = 30, SW = 6
+// ── Energy ring ───────────────────────────────────────────────
+// Multi-layer SVG: dim track + gradient progress arc (orange→cyan)
+// + leading-edge dot at the arc tip + soft halo glow that pulses when the
+// target is reached. Numbers in the centre use the display font for a
+// HUD-style readout.
+function EnergyRing({ completed, target }) {
+  const SIZE = 96, CX = 48, R = 36, SW = 5
   const C        = 2 * Math.PI * R
   const progress = target > 0 ? completed / target : 0
   const over     = progress > 1
   const capped   = Math.min(progress, 1)
-  const ringColor = over ? '#FFB800' : capped >= 1 ? 'var(--success)' : 'var(--accent)'
 
-  // When over target, show a second arc for the overflow (up to 110%)
-  const overflowPct    = over ? Math.min((progress - 1) / 0.1, 1) : 0
-  const overflowOffset = (C * (1 - overflowPct)).toFixed(2)
-  const mainOffset     = over ? '0' : (C * (1 - capped)).toFixed(2)
+  // Leading-edge dot position along the arc. Top of the circle is 12 o'clock
+  // (-90deg in math coords), and the arc grows clockwise.
+  const angleRad = (-90 + capped * 360) * Math.PI / 180
+  const dotX = CX + R * Math.cos(angleRad)
+  const dotY = CX + R * Math.sin(angleRad)
+
+  const mainOffset = (C * (1 - capped)).toFixed(2)
+  const stateClass = over ? 'energy-ring--over'
+                   : capped >= 1 ? 'energy-ring--done'
+                   : ''
+
+  // Per-instance gradient ID so multiple rings on the same screen don't
+  // collide on the same <defs> id.
+  const gradId = `er-grad-${target}-${completed}`
 
   return (
-    <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} className="ring-svg">
-      {/* Track */}
+    <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}
+         className={`energy-ring ${stateClass}`}>
+      <defs>
+        <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%"   stopColor="#FF5500" />
+          <stop offset="100%" stopColor="#00C2A8" />
+        </linearGradient>
+        <radialGradient id={`${gradId}-halo`} cx="50%" cy="50%" r="50%">
+          <stop offset="55%" stopColor="#00C2A8" stopOpacity="0" />
+          <stop offset="78%" stopColor="#00C2A8" stopOpacity="0.32" />
+          <stop offset="100%" stopColor="#00C2A8" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/* Halo — dormant until the user hits target */}
+      <circle cx={CX} cy={CX} r={R + 8} fill={`url(#${gradId}-halo)`}
+              className="energy-ring__halo" />
+
+      {/* Track ring */}
       <circle cx={CX} cy={CX} r={R} fill="none"
-        stroke="var(--surface3)" strokeWidth={SW} />
-      {/* Main arc */}
+              stroke="rgba(255, 255, 255, 0.07)" strokeWidth={SW} />
+
+      {/* Progress arc */}
       {completed > 0 && (
         <circle cx={CX} cy={CX} r={R} fill="none"
-          stroke={ringColor}
-          strokeWidth={SW}
-          strokeLinecap="round"
-          strokeDasharray={C.toFixed(2)}
-          strokeDashoffset={mainOffset}
-          transform={`rotate(-90 ${CX} ${CX})`}
+                stroke={over ? '#FFB800' : `url(#${gradId})`}
+                strokeWidth={SW}
+                strokeLinecap="round"
+                strokeDasharray={C.toFixed(2)}
+                strokeDashoffset={mainOffset}
+                transform={`rotate(-90 ${CX} ${CX})`}
+                className="energy-ring__arc"
         />
       )}
-      {/* Overflow arc — thinner ring on top when over target */}
-      {over && (
-        <circle cx={CX} cy={CX} r={R} fill="none"
-          stroke="#fff"
-          strokeWidth={SW - 3}
-          strokeOpacity={0.35}
-          strokeLinecap="round"
-          strokeDasharray={C.toFixed(2)}
-          strokeDashoffset={overflowOffset}
-          transform={`rotate(-90 ${CX} ${CX})`}
-        />
+
+      {/* Leading-edge dot — sits at the tip of the arc, hidden when
+          the ring fills the entire circle so it doesn't overlap the start. */}
+      {completed > 0 && capped < 1 && (
+        <circle cx={dotX} cy={dotY} r={3.5}
+                fill="#FF8A4C" className="energy-ring__tip" />
       )}
-      {/* Centre: session count */}
-      <text x={CX} y={CX - 5} textAnchor="middle"
-        dominantBaseline="central" className="ring-count">
-        {completed}
-      </text>
-      {/* Centre: /target */}
-      <text x={CX} y={CX + 11} textAnchor="middle"
-        dominantBaseline="central" className="ring-sub">
-        /{target}
-      </text>
+
+      {/* HUD readout */}
+      <text x={CX} y={CX - 4} textAnchor="middle" dominantBaseline="central"
+            className="energy-ring__count">{completed}</text>
+      <text x={CX} y={CX + 14} textAnchor="middle" dominantBaseline="central"
+            className="energy-ring__sub">/ {target}</text>
     </svg>
   )
 }
@@ -199,7 +222,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
       {/* ── Weekly completion ring ───────────────────── */}
       {weeklyProgress && (
         <div className={`week-card${weekDone ? ' week-card--done' : ''}${weekOver ? ' week-card--over' : ''}`}>
-          <CompletionRing
+          <EnergyRing
             completed={weeklyProgress.completed}
             target={weeklyProgress.target}
           />
