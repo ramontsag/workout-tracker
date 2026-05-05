@@ -322,14 +322,31 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
             // calendar day, regardless of plan.
             const calendarActual = weeklyProgress?.actualByWeekday?.[day.name] || []
             const isDone    = calendarActual.length > 0
+            // Dedupe by kind+label so a re-saved block doesn't double-count.
+            const dedupedActual = (() => {
+              const seen = new Set(); const out = []
+              for (const a of calendarActual) {
+                const k = `${a.kind}:${a.label.toLowerCase()}`
+                if (seen.has(k)) continue
+                seen.add(k); out.push(a)
+              }
+              return out
+            })()
+            const offScheduleActual = dedupedActual.filter(a => !a.onSchedule)
+            const onScheduleActual  = dedupedActual.filter(a =>  a.onSchedule)
+            // "Override" = this calendar day has work logged, but NONE of it
+            // was from this day's plan. Triggers the dimmed title + tinted ✓.
+            const isOverridden = isDone && onScheduleActual.length === 0
+            const overrideKind = isOverridden && offScheduleActual.length
+              ? (offScheduleActual.some(a => a.kind === 'workout') ? 'workout' : 'activity')
+              : null
             // Per-day completion badge ("2/3") — only meaningful on days with
-            // multiple items. Hidden on rest/empty days and on single-item
-            // days where the ✓ already implies "all done".
-            const dayCompletion = weeklyProgress?.dayCompletion?.[day.id]
+            // multiple items. Counts follow the CALENDAR day (matches ✓): if
+            // you did 1 thing on Monday — even one of Sunday's planned items —
+            // Monday reads 1/3 of its plan. Capped at total so doing extras
+            // doesn't push it past "complete".
             const totalItems    = blockCount + actCount
-            const doneItems     = dayCompletion
-              ? Math.min(totalItems, (dayCompletion.blocks || 0) + (dayCompletion.activities || 0))
-              : 0
+            const doneItems     = Math.min(totalItems, dedupedActual.length)
             const showBadge     = isDone && totalItems > 1 && doneItems > 0
 
             return (
@@ -358,37 +375,29 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                       title="Edit day"
                     >Edit</button>
                   </div>
-                  <div className="day-card__focus">{dayTitle}</div>
-                  {countLabel && <div className="day-card__count">{countLabel}</div>}
-                  {/* "Actual" pills — what was done on this CALENDAR day,
-                      surfaced only when the work landed off-schedule (e.g.
-                      you did Sunday's plan on Monday). On-schedule
-                      completions are already represented by the ✓ on the
-                      right, so we suppress them here to avoid noise. */}
-                  {(() => {
-                    const list = (weeklyProgress?.actualByWeekday?.[day.name] || [])
-                      .filter(a => !a.onSchedule)
-                    if (!list.length) return null
-                    const seen = new Set()
-                    const unique = list.filter(a => {
-                      const k = `${a.kind}:${a.label.toLowerCase()}`
-                      if (seen.has(k)) return false
-                      seen.add(k); return true
-                    })
-                    return (
-                      <div className="day-card__actual">
-                        {unique.map((a, k) => (
-                          <span
-                            key={k}
-                            className={`day-card__actual-pill day-card__actual-pill--${a.kind}`}
-                            title={`Actually done on ${day.name}`}
-                          >
-                            ✓ {a.label}
-                          </span>
-                        ))}
-                      </div>
-                    )
-                  })()}
+                  <div className={`day-card__focus${isOverridden ? ' day-card__focus--overridden' : ''}`}>{dayTitle}</div>
+                  {countLabel && (
+                    <div className={`day-card__count${isOverridden ? ' day-card__count--overridden' : ''}`}>{countLabel}</div>
+                  )}
+                  {/* "Did:" pills — what was actually done on this CALENDAR
+                      day but NOT part of this day's plan (e.g. Sunday's
+                      workout done on Monday). Loud styling + a "DID" label so
+                      they dominate the (now-dimmed) planned title when the
+                      day was overridden. */}
+                  {offScheduleActual.length > 0 && (
+                    <div className="day-card__actual">
+                      <span className="day-card__actual-label">Did</span>
+                      {offScheduleActual.map((a, k) => (
+                        <span
+                          key={k}
+                          className={`day-card__actual-pill day-card__actual-pill--${a.kind}`}
+                          title={`Actually done on ${day.name}`}
+                        >
+                          ✓ {a.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="day-card__indicator-wrap">
                   {showBadge && (
@@ -397,7 +406,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                       title={`${doneItems} of ${totalItems} items done this week`}
                     >{doneItems}/{totalItems}</span>
                   )}
-                  <div className={`day-card__indicator-circle day-card__indicator-circle--${indicatorType}${isDone ? ' day-card__indicator-circle--done' : ''}`}
+                  <div className={`day-card__indicator-circle day-card__indicator-circle--${indicatorType}${isDone ? ' day-card__indicator-circle--done' : ''}${overrideKind ? ` day-card__indicator-circle--override-${overrideKind}` : ''}`}
                     title={isDone ? `Completed ${doneItems}/${totalItems} this week` : undefined}
                     aria-label={isDone ? 'Completed' : undefined}
                   >
