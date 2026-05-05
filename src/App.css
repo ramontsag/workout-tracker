@@ -2068,16 +2068,39 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   font-weight: 700;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: var(--accent);
-  background: rgba(255, 85, 0, 0.12);
-  border: 1px solid rgba(255, 85, 0, 0.40);
   border-radius: 6px;
   padding: 5px 10px;
   cursor: pointer;
   margin-right: 12px;
   -webkit-tap-highlight-color: transparent;
+  border: 1px solid transparent;
+  background: rgba(255, 85, 0, 0.12);
+  color: var(--accent);
+  border-color: rgba(255, 85, 0, 0.40);
 }
 .day-edit-pill:active { opacity: 0.7; }
+/* Day-kind variants — mirror the Home day-card edit button so orange =
+   workout, cyan = activity, purple = hybrid, grey = empty. */
+.day-edit-pill--gym {
+  color: var(--accent);
+  background: rgba(255, 85, 0, 0.14);
+  border-color: rgba(255, 85, 0, 0.45);
+}
+.day-edit-pill--rest {
+  color: var(--cyan);
+  background: rgba(0, 194, 168, 0.14);
+  border-color: rgba(0, 194, 168, 0.45);
+}
+.day-edit-pill--hybrid {
+  color: #c4b5fd;
+  background: rgba(168, 85, 247, 0.16);
+  border-color: rgba(168, 85, 247, 0.45);
+}
+.day-edit-pill--empty {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.14);
+  border-color: rgba(148, 163, 184, 0.32);
+}
 
 .day-section-label {
   font-size: 10px;

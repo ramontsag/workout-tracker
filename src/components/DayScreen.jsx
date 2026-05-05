@@ -205,6 +205,14 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
   // Each workout block is its own session. Activities are independent items.
   const blocks        = day.workout_blocks || []
   const activityItems = (day.exercises || []).filter(e => e.item_type === 'activity')
+  // Day kind for color theming the header Edit button. Mirrors the rule used
+  // on Home day cards so the Edit button is orange on workout-only days,
+  // cyan on activity-only days, purple when both, grey on empty.
+  const populatedBlocks = blocks.filter(b => (b.exercises || []).length > 0)
+  const dayKind = (populatedBlocks.length === 0 && activityItems.length === 0) ? 'empty'
+    : (populatedBlocks.length > 0 && activityItems.length > 0) ? 'hybrid'
+    : populatedBlocks.length > 0 ? 'gym'
+    : 'rest'
 
   // Per-week completion state, keyed by block id (for workouts) and activity
   // name. Hydrated from DB on mount.
@@ -374,7 +382,7 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
           <div className="sub-header__title">{day.name}</div>
         </div>
         <button
-          className="day-edit-pill"
+          className={`day-edit-pill day-edit-pill--${dayKind}`}
           onClick={() => setEditDayOpen(true)}
         >Edit</button>
       </header>

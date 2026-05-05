@@ -1437,34 +1437,18 @@ export async function getWeeklyProgress(uid) {
 
   const target       = profileRes.data?.weekly_target ?? 4
   const weekWorkouts = weekWorkoutsRes.data || []
-  const workoutIds   = weekWorkouts.map(w => w.id)
 
-  // Pull every set logged within this week's workouts, then classify each
-  // row to count exercise sessions (1 per workout that contains any
-  // exercise/check rows) plus one count per activity row. Each activity in
-  // a day counts separately — 2 activities = +2.
+  // Each completed workouts row = one session. kind='workout' rows count as
+  // exercise sessions; kind='activity' rows count as activity sessions.
+  // Counting from `workouts` directly (rather than joining workout_sets and
+  // classifying rows) keeps the weekly total in lockstep with the calendar
+  // ✓ — both now read from the same source, so a session can't show as
+  // "done" on a day card while still reading 0 in the week ring.
   let exerciseWorkoutCount = 0
   let activityCount = 0
-  if (workoutIds.length) {
-    const { data: rows, error: setsErr } = await withTimeout(
-      supabase
-        .from('workout_sets')
-        .select('workout_id, weight_kg, reps, duration_min, distance_km, intensity, avg_hr, calories, rounds, elevation_m')
-        .in('workout_id', workoutIds),
-      5000, 'Load week sets'
-    )
-    if (setsErr) console.warn('weekly sets load:', setsErr.message)
-    const isActivity = (r) =>
-      (!r.weight_kg) && (!r.reps) && !!(
-        r.duration_min || r.distance_km || r.intensity ||
-        r.avg_hr || r.calories || r.rounds || r.elevation_m
-      )
-    const exerciseWorkouts = new Set()
-    for (const r of rows || []) {
-      if (isActivity(r)) activityCount++
-      else exerciseWorkouts.add(r.workout_id)
-    }
-    exerciseWorkoutCount = exerciseWorkouts.size
+  for (const w of weekWorkouts) {
+    if (w.kind === 'activity') activityCount++
+    else                       exerciseWorkoutCount++
   }
   const completed = exerciseWorkoutCount + activityCount
 
