@@ -43,7 +43,7 @@ export default function App() {
       if (uid) {
         try { await seedProgramIfMissing(uid) } catch (e) { console.warn('[App] seed failed:', e.message) }
       }
-      const days = await getProgram()
+      const days = await getProgram(uid)
       setProgram(days)
       go('home')
     } catch (err) {
@@ -56,12 +56,14 @@ export default function App() {
   // NOT navigate, so the user stays where they are.
   const refreshProgram = useCallback(async () => {
     try {
-      const days = await getProgram()
+      const uid = user?.id
+      if (!uid) return
+      const days = await getProgram(uid)
       setProgram(days)
     } catch (err) {
       console.warn('[App] refreshProgram failed:', err.message)
     }
-  }, [])
+  }, [user?.id])
 
   const loadProfile = useCallback(async () => {
     try {
@@ -160,6 +162,7 @@ export default function App() {
         <ExerciseHistory
           exercise={activeExercise}
           profile={profile}
+          userId={user?.id}
           onBack={() => go('workout')}
         />
       )

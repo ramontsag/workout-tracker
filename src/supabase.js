@@ -228,25 +228,19 @@ export async function seedProgramIfMissing(uid) {
   if (insErr) throw new Error(`Seed program failed: ${insErr.message}`)
 }
 
-// Delete a user's custom exercise (or activity) by name. Removes program rows
-// AND every workout_sets row referencing that name. Catalog names live in
-// code, not the DB, so this only affects user-created/used items. Tolerant
-// of "nothing to delete" — the picker fires this even when rows already gone
-// (e.g. only logged in workout_sets, never on a day).
+// Removes a custom item from the user's PROGRAM only. Past workout_sets
+// rows are preserved so historical sessions stay intact — the user can
+// still see a chart of when they did "Bench press" even after dropping
+// it from every day. Catalog (built-in) names live in code, not the DB.
 export async function deleteCustomItem(name, uid) {
   if (!uid)  throw new Error('Not authenticated')
   if (!name) throw new Error('No name')
   const trimmed = name.trim()
-  const r1 = await withTimeout(
-    supabase.from('workout_sets').delete().eq('user_id', uid).eq('exercise_name', trimmed),
-    5000, 'Delete history'
-  )
-  if (r1.error) throw new Error(`Delete history failed: ${r1.error.message}`)
-  const r2 = await withTimeout(
+  const { error } = await withTimeout(
     supabase.from('exercises').delete().eq('user_id', uid).eq('name', trimmed),
-    5000, 'Delete program rows'
+    5000, 'Remove from program'
   )
-  if (r2.error) throw new Error(`Delete program rows failed: ${r2.error.message}`)
+  if (error) throw new Error(`Remove from program failed: ${error.message}`)
 }
 
 // Partial UPDATE on a single training_day row. Used by EditDayModal and the
@@ -261,23 +255,25 @@ export async function updateDayMeta(dayId, fields, uid) {
   if (error) throw new Error(`Update day failed: ${error.message}`)
 }
 
-export async function getProgram() {
-  // Query both tables in parallel.
-  // activity_days may or may not still exist (depends on whether
-  // migrate_unified.sql has been run). The catch makes it non-fatal.
+export async function getProgram(uid) {
+  if (!uid) throw new Error('Not authenticated')
+  // Query both tables in parallel. Each query explicitly filters by uid in
+  // addition to RLS — defense in depth, and the consistency makes audits
+  // easy ("every read passes uid"). activity_days may or may not exist
+  // (depends on whether migrate_unified.sql has been run).
   const [trainingResult, activityResult, blocksResult] = await Promise.all([
     withTimeout(
-      supabase.from('training_days').select('*, exercises(*)').order('sort_order', { ascending: true }),
+      supabase.from('training_days').select('*, exercises(*)').eq('user_id', uid).order('sort_order', { ascending: true }),
       5000, 'Load training days'
     ),
     withTimeout(
-      supabase.from('activity_days').select('*, activity_types(*)').order('sort_order', { ascending: true }),
+      supabase.from('activity_days').select('*, activity_types(*)').eq('user_id', uid).order('sort_order', { ascending: true }),
       5000, 'Load activity days'
-    ).catch(() => ({ data: null, error: null })),
+    ).catch((e) => { console.warn('activity_days load:', e?.message); return { data: null, error: null } }),
     withTimeout(
-      supabase.from('workout_blocks').select('*').order('sort_order', { ascending: true }),
+      supabase.from('workout_blocks').select('*').eq('user_id', uid).order('sort_order', { ascending: true }),
       5000, 'Load workout blocks'
-    ).catch(() => ({ data: null, error: null })),
+    ).catch((e) => { console.warn('workout_blocks load:', e?.message); return { data: null, error: null } }),
   ])
 
   if (trainingResult.error) throw new Error(`Could not load program: ${trainingResult.error.message}`)
@@ -406,10 +402,12 @@ export async function saveProgram(days, uid) {
 
   const dayIdMap = {}
 
-  // 2 — delete removed days (CASCADE deletes their exercises)
+  // 2 — delete removed days (CASCADE deletes their exercises). Defensive
+  // user_id filter on top of RLS — an audit-friendly redundancy and a safety
+  // net if RLS policies are ever loosened.
   if (toDelete.length) {
     const { error } = await db(
-      supabase.from('training_days').delete().in('id', toDelete),
+      supabase.from('training_days').delete().eq('user_id', uid).in('id', toDelete),
       'Delete removed days'
     )
     if (error) throw new Error(`Delete failed: ${error.message}`)
@@ -449,22 +447,20 @@ export async function saveProgram(days, uid) {
     ;(newDays || []).forEach(d => { dayIdMap[d.name.toLowerCase()] = d.id })
   }
 
-  // 5a — delete old exercises for updated days
-  const updatedIds = toUpdate.map(d => d.id)
-  if (updatedIds.length) {
-    const { error } = await db(
-      supabase.from('exercises').delete().in('training_day_id', updatedIds),
-      'Delete old exercises'
-    )
-    if (error) throw new Error(`Delete exercises failed: ${error.message}`)
-  }
-
-  // 5b — batch insert all exercises in one round trip
+  // 5 — atomic-ish replacement of exercise rows on updated days.
+  // Build the full insert payload FIRST. If the payload is malformed we bail
+  // BEFORE deleting anything, so a bad save can never wipe rows without
+  // replacement. This isn't a true DB transaction (would require an RPC), but
+  // it eliminates the worst case where step 5a succeeds and 5b fails on a
+  // validation-shaped error.
   const allExercises = []
   for (const day of days) {
     const dayId = dayIdMap[day.name.toLowerCase()]
     if (!dayId) continue
-    day.exercises.forEach((ex, j) =>
+    day.exercises.forEach((ex, j) => {
+      if (!ex.name || typeof ex.name !== 'string') {
+        throw new Error('Save aborted: every exercise needs a name (no rows changed).')
+      }
       allExercises.push({
         user_id:          uid,
         training_day_id:  dayId,
@@ -484,40 +480,59 @@ export async function saveProgram(days, uid) {
         has_drop_sets:    ex.item_type === 'exercise' ? (ex.drop_set_mode ? ex.drop_set_mode !== 'off' : !!ex.has_drop_sets) : false,
         drop_set_mode:    ex.item_type === 'exercise' ? (ex.drop_set_mode || (ex.has_drop_sets ? 'all' : 'off')) : 'off',
       })
-    )
+    })
   }
+
+  // 5a — delete old exercises only for days we're about to repopulate. uid
+  // filter on top of RLS for the same defense-in-depth reason as step 2.
+  const updatedIds = toUpdate.map(d => d.id)
+  if (updatedIds.length) {
+    const { error } = await db(
+      supabase.from('exercises').delete().eq('user_id', uid).in('training_day_id', updatedIds),
+      'Delete old exercises'
+    )
+    if (error) throw new Error(`Delete exercises failed: ${error.message}`)
+  }
+
+  // 5b — single round trip. If this fails after 5a wiped, the days now have
+  // no exercises — surfaced explicitly so the caller can tell the user.
   if (allExercises.length) {
     const { error } = await db(
       supabase.from('exercises').insert(allExercises),
       'Insert exercises'
     )
-    if (error) throw new Error(`Insert exercises failed: ${error.message}`)
+    if (error) throw new Error(`Insert exercises failed (your previous program rows were cleared but the replacement didn't land — please retry the save): ${error.message}`)
   }
 }
 
 // ── Workouts ──────────────────────────────────────────────────
 
-export async function getLastSession(trainingDayId) {
-  const { data: sessions } = await withTimeout(
+export async function getLastSession(trainingDayId, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data: sessions, error } = await withTimeout(
     supabase
       .from('workouts')
       .select('id, completed_at')
+      .eq('user_id', uid)
       .eq('training_day_id', trainingDayId)
       .eq('status', 'completed')
       .order('completed_at', { ascending: false })
       .limit(1),
     5000, 'Load last session'
   )
+  if (error) throw new Error(`Load last session failed: ${error.message}`)
   if (!sessions?.length) return null
 
-  const { data: sets } = await withTimeout(
+  const { data: sets, error: setsErr } = await withTimeout(
     supabase
       .from('workout_sets')
       .select('*')
+      .eq('user_id', uid)
       .eq('workout_id', sessions[0].id)
       .order('set_number', { ascending: true }),
     5000, 'Load last session sets'
   )
+  if (setsErr) throw new Error(`Load last session sets failed: ${setsErr.message}`)
   return { workout: sessions[0], sets: sets || [] }
 }
 
@@ -945,6 +960,29 @@ export async function discardDraft(workoutId, uid) {
   if (error) throw new Error(`Discard failed: ${error.message}`)
 }
 
+// Returns every completed workouts row in [startISO, endISO). Used by the
+// calendar view to show what was done on each day in a month. Returned
+// rows include kind, name, training_day_id, block id, and completed_at so
+// the calendar can render kind-colored dots and a tap-through detail sheet
+// without a second round trip per day.
+export async function getCompletedSessionsInRange(startISO, endISO, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  if (!startISO || !endISO) return []
+  const { data, error } = await withTimeout(
+    supabase
+      .from('workouts')
+      .select('id, kind, day_name, activity_name, workout_block_id, training_day_id, completed_at')
+      .eq('user_id', uid)
+      .eq('status', 'completed')
+      .gte('completed_at', startISO)
+      .lt('completed_at', endISO)
+      .order('completed_at', { ascending: true }),
+    5000, 'Load month sessions'
+  )
+  if (error) throw new Error(`Load month sessions failed: ${error.message}`)
+  return data || []
+}
+
 // Returns the completed workouts rows (kind + activity_name + completed_at)
 // for a given training_day_id since the start of this calendar week (Monday
 // 00:00 local). DayScreen uses this to mark each card done/in-progress on
@@ -967,20 +1005,26 @@ export async function getCompletedSessionsThisWeek(uid, trainingDayId) {
   return data || []
 }
 
-// Returns training_day_ids that have an in-progress workout.
-// Used by Home.jsx to render the "● in progress" indicator.
+// Returns training_day_ids that have an in-progress workout AND whose
+// training_day still exists. Filters out orphans whose day was deleted via
+// EditDayModal — those would otherwise be invisible drafts (the in-progress
+// indicator wouldn't render anywhere because no day card matches).
 export async function getInProgressDayIds(uid) {
   if (!uid) throw new Error('Not authenticated')
   const { data, error } = await withTimeout(
     supabase
       .from('workouts')
-      .select('training_day_id')
+      .select('training_day_id, training_day:training_days(id)')
       .eq('user_id', uid)
       .eq('status', 'in_progress'),
     5000, 'Load in-progress days'
   )
   if (error) throw new Error(`Load drafts failed: ${error.message}`)
-  return new Set((data || []).map(r => r.training_day_id))
+  return new Set(
+    (data || [])
+      .filter(r => r.training_day && r.training_day_id)
+      .map(r => r.training_day_id)
+  )
 }
 
 // Bump (or shrink) the planned set_count on a single exercise row. Used by
@@ -1279,12 +1323,23 @@ export async function completeWorkout(
     })
   }
 
+  // Idempotency: if the user retries Complete after a flaky network
+  // double-completion, we'd duplicate every set row. Guard by checking for
+  // any existing sets on this workout id first; if they exist, skip insert
+  // and just flip the status. The workout row's UNIQUE id makes this safe.
   if (rowsToInsert.length) {
-    const { error: sErr } = await withTimeout(
-      supabase.from('workout_sets').insert(rowsToInsert),
-      5000, 'Save sets'
+    const { data: existing, error: existErr } = await withTimeout(
+      supabase.from('workout_sets').select('id').eq('user_id', uid).eq('workout_id', workoutId).limit(1),
+      5000, 'Check existing sets'
     )
-    if (sErr) throw new Error(`Save sets failed: ${sErr.message}`)
+    if (existErr) throw new Error(`Check sets failed: ${existErr.message}`)
+    if (!existing?.length) {
+      const { error: sErr } = await withTimeout(
+        supabase.from('workout_sets').insert(rowsToInsert),
+        5000, 'Save sets'
+      )
+      if (sErr) throw new Error(`Save sets failed: ${sErr.message}`)
+    }
   }
 
   // Finalize the workout row — flip status, set completed_at, clear draft_state.
@@ -1366,11 +1421,13 @@ export async function getLastSetsByExercise(exerciseNames, uid) {
   return out
 }
 
-export async function getExerciseHistory(exerciseName) {
+export async function getExerciseHistory(exerciseName, uid) {
+  if (!uid) throw new Error('Not authenticated')
   const { data, error } = await withTimeout(
     supabase
       .from('workout_sets')
-      .select('*, workout:workouts(id, completed_at, day_name)')
+      .select('*, workout:workouts(id, completed_at, day_name, status)')
+      .eq('user_id', uid)
       .eq('exercise_name', exerciseName)
       .order('set_number', { ascending: true }),
     5000, 'Load history'
@@ -1379,12 +1436,16 @@ export async function getExerciseHistory(exerciseName) {
 
   const byWorkout = {}
   for (const set of data || []) {
+    // Drafts (in_progress) and orphan rows whose parent workout no longer
+    // exists shouldn't show up in history — both surface as null/undefined
+    // workout, which would render with `date: undefined` and confuse sorting.
+    if (!set.workout || set.workout.status !== 'completed') continue
     const wid = set.workout_id
     if (!byWorkout[wid]) {
       byWorkout[wid] = {
         workoutId: wid,
-        date:      set.workout?.completed_at,
-        dayName:   set.workout?.day_name,
+        date:      set.workout.completed_at,
+        dayName:   set.workout.day_name,
         sets:      [],
       }
     }
@@ -1603,12 +1664,14 @@ export async function getStats() {
 
 // Returns the total volume (weight_kg × reps, summed) and date of the most
 // recent workout on this training day, excluding the workout just saved.
-// No uid parameter — RLS filters to the authenticated user automatically.
-export async function getPreviousSessionVolume(trainingDayId, excludeWorkoutId) {
+// uid is required and explicitly filtered (defense in depth on top of RLS).
+export async function getPreviousSessionVolume(trainingDayId, excludeWorkoutId, uid) {
+  if (!uid) throw new Error('Not authenticated')
   const { data: sessions, error } = await withTimeout(
     supabase
       .from('workouts')
       .select('id, completed_at')
+      .eq('user_id', uid)
       .eq('training_day_id', trainingDayId)
       .eq('status', 'completed')
       .neq('id', excludeWorkoutId)
@@ -1616,16 +1679,18 @@ export async function getPreviousSessionVolume(trainingDayId, excludeWorkoutId) 
       .limit(1),
     5000, 'Load previous session'
   )
-  if (error || !sessions?.length) return null
+  if (error) { console.warn('previous session load:', error.message); return null }
+  if (!sessions?.length) return null
 
   const { data: prevSets, error: setsErr } = await withTimeout(
     supabase
       .from('workout_sets')
       .select('weight_kg, reps, is_warmup')
+      .eq('user_id', uid)
       .eq('workout_id', sessions[0].id),
     5000, 'Load previous sets'
   )
-  if (setsErr) return null
+  if (setsErr) { console.warn('previous sets load:', setsErr.message); return null }
 
   const volume = (prevSets || [])
     .filter(s => !s.is_warmup)
@@ -1881,10 +1946,13 @@ export async function getTemplates(uid) {
   }))
 }
 
-// Delete a template (cascades to template_exercises via FK).
-export async function deleteTemplate(templateId) {
+// Delete a template (cascades to template_exercises via FK). uid is
+// required and explicitly filtered so this is safe even if RLS policy
+// is ever loosened (no template id from another user could be deleted).
+export async function deleteTemplate(templateId, uid) {
+  if (!uid) throw new Error('Not authenticated')
   const { error } = await withTimeout(
-    supabase.from('templates').delete().eq('id', templateId),
+    supabase.from('templates').delete().eq('user_id', uid).eq('id', templateId),
     5000, 'Delete template'
   )
   if (error) throw new Error(`Delete failed: ${error.message}`)

@@ -964,8 +964,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   }, [userId, day.id, blockName])
 
   useEffect(() => {
-    getLastSession(day.id).then(setLastSession).catch(() => {})
-  }, [day.id])
+    if (!userId) return
+    getLastSession(day.id, userId).then(setLastSession).catch(() => {})
+  }, [day.id, userId])
 
   useEffect(() => {
     if (!blockId) { setPreviousBlockSession(null); return }
@@ -1683,7 +1684,7 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
       const currentVolKg = calcSessionVolume(sets, unit)
       let msg = ''
       try {
-        const prev = await getPreviousSessionVolume(day.id, workout.id)
+        const prev = await getPreviousSessionVolume(day.id, workout.id, userId)
         msg = buildVolumeMsg(currentVolKg, prev) || ''
       } catch { /* non-fatal */ }
       setVolumeMsg(msg)

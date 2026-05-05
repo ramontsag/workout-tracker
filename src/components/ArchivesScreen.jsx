@@ -25,7 +25,7 @@ export default function ArchivesScreen({ user, program, onBack, onProgramUpdated
     setDeletingId(id)
     setConfirmId(null)
     try {
-      await deleteTemplate(id)
+      await deleteTemplate(id, user?.id)
       setTemplates(prev => prev.filter(t => t.id !== id))
       if (expandedId === id) setExpandedId(null)
     } catch (e) {

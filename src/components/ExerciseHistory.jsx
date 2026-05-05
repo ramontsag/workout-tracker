@@ -5,7 +5,7 @@ import { formatActivityLine, isActivityRow } from '../utils/sessionFormat'
 
 function fmt(val) { return val === 0 ? '—' : val }
 
-export default function ExerciseHistory({ exercise, profile, onBack }) {
+export default function ExerciseHistory({ exercise, profile, userId, onBack }) {
   const unit  = profile?.weight_unit || 'kg'
   const label = unitLabel(unit)
 
@@ -15,16 +15,22 @@ export default function ExerciseHistory({ exercise, profile, onBack }) {
   const [range, setRange] = useState('6m')  // '4w' | '3m' | '6m' | 'all'
 
   useEffect(() => {
-    getExerciseHistory(exercise)
+    if (!userId) return
+    setLoading(true); setError(null)
+    getExerciseHistory(exercise, userId)
       .then(setSessions)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [exercise])
+  }, [exercise, userId])
 
-  // Sum in kg, excluding warmup sets from the headline volume figure.
+  // Sum in kg, excluding warmups AND drop sets — matches the volume rule used
+  // on Progress > Lifts (`getVolumeHistory` in supabase.js). Drop sets are
+  // assistance burnouts after a top set; counting them inflates this screen's
+  // volume vs. the dashboard, which made the same exercise read two different
+  // numbers in two places.
   const volumeKg = (sets) =>
     sets
-      .filter(s => !s.is_warmup)
+      .filter(s => !s.is_warmup && !s.is_drop_set)
       .reduce((acc, s) => acc + (s.weight_kg || 0) * (s.reps || 0), 0)
 
   // Client-side range filter — 'all' shows everything; the rest cap at the
