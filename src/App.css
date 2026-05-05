@@ -4614,4 +4614,180 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   flex-shrink: 0;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* ── Calendar view (trial) ───────────────────────────
+   Month grid + per-day kind dots + tap-through detail sheet. Mobile-first;
+   cells are roughly square at 375px (~50px tall). Past completions stay
+   visible; future days are dim; today gets a colored outline. */
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px 4px;
+}
+.calendar-nav-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.calendar-nav-btn:active { opacity: 0.75; }
+.calendar-month-btn {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  padding: 4px 16px 14px;
+}
+.calendar-weekday {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  padding: 6px 0;
+}
+.calendar-cell {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.calendar-cell:active { opacity: 0.75; }
+.calendar-cell--out    { opacity: 0.32; }
+.calendar-cell--future { opacity: 0.5; }
+.calendar-cell--today  {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(255, 85, 0, 0.45) inset;
+}
+.calendar-cell--done   {
+  background: var(--surface2);
+  border-color: var(--border-subtle);
+}
+.calendar-cell__num {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+.calendar-cell__dots {
+  display: inline-flex;
+  gap: 3px;
+  min-height: 6px;
+}
+.calendar-cell__count {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.calendar-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.calendar-dot--workout  { background: var(--accent); }
+.calendar-dot--activity { background: var(--cyan); }
+.calendar-dot--hybrid   { background: var(--hybrid); }
+
+.calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  padding: 4px 16px 14px;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+.calendar-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Day-detail bottom sheet — reuses .picker-overlay/.picker-sheet from the
+   catalog picker so it shares modal behavior, but caps height shorter
+   since it's typically a short list. */
+.calendar-sheet { max-height: 70vh; }
+.calendar-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+.calendar-day-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.calendar-day-row--workout  { border-left: 3px solid var(--accent); }
+.calendar-day-row--activity { border-left: 3px solid var(--cyan); }
+.calendar-day-row__check {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.calendar-day-row--workout  .calendar-day-row__check { color: var(--accent); }
+.calendar-day-row--activity .calendar-day-row__check { color: var(--cyan); }
+.calendar-day-row__label {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.calendar-day-row__time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
 .workout-done-banner__edit:active { background: rgba(255, 85, 0, 0.12); }

@@ -9,6 +9,7 @@ import ProfileScreen   from './components/ProfileScreen'
 import ProgressScreen  from './components/ProgressScreen'
 import ArchivesScreen  from './components/ArchivesScreen'
 import HistoryScreen   from './components/HistoryScreen'
+import CalendarScreen  from './components/CalendarScreen'
 import SettingsScreen  from './components/SettingsScreen'
 import FloatingTimer   from './components/FloatingTimer'
 import { stop as stopRestTimer } from './restTimerStore'
@@ -256,7 +257,17 @@ export default function App() {
           onProgress={() => go('progress')}
           onArchives={() => go('archives')}
           onHistory={() => go('history-list')}
+          onCalendar={() => go('calendar')}
           onSettings={() => go('settings')}
+        />
+      )
+    }
+
+    if (screen === 'calendar') {
+      return (
+        <CalendarScreen
+          userId={user?.id}
+          onBack={() => go('profile')}
         />
       )
     }
