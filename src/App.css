@@ -1689,6 +1689,10 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
+.setup-tab--active.setup-tab--activity {
+  color: var(--cyan);
+  border-bottom-color: var(--cyan);
+}
 
 /* ── Activity Cards ───────────────────────────────── */
 .activity-card {
@@ -1745,7 +1749,7 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   transition: border-color 0.15s;
   font-family: var(--font-body);
 }
-.activity-notes:focus        { outline: none; border-color: var(--accent); background: var(--surface3); }
+.activity-notes:focus        { outline: none; border-color: var(--cyan); background: var(--surface3); }
 .activity-notes::placeholder { color: var(--text-muted); }
 
 /* Per-activity Mark-done button + completed state */
@@ -2890,8 +2894,9 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   background: rgba(255, 85, 0, 0.10);
 }
 .floating-pill--rest {
-  color: var(--cyan, #22d3ee);
-  border-color: rgba(34, 211, 238, 0.40);
+  color: var(--cyan);
+  border-color: rgba(0, 194, 168, 0.45);
+  background: rgba(0, 194, 168, 0.10);
 }
 
 /* Timer on/off toggle in workout header */
@@ -4243,8 +4248,8 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   align-items: center;
   justify-content: space-between;
   background: var(--surface2);
-  border: 1px solid var(--cyan);
-  color: var(--cyan);
+  border: 1px solid var(--accent);
+  color: var(--accent);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   margin-bottom: 12px;
@@ -4367,8 +4372,8 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .resume-banner-btns { display: flex; align-items: center; gap: 8px; }
 .resume-banner-discard {
   background: transparent;
-  border: 1px solid var(--cyan);
-  color: var(--cyan);
+  border: 1px solid var(--accent);
+  color: var(--accent);
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   font-size: 12px;

@@ -503,7 +503,7 @@ export default function ProgressScreen({ user, profile, onBack }) {
           Body
         </button>
         <button
-          className={`setup-tab ${activeTab === 'activities' ? 'setup-tab--active' : ''}`}
+          className={`setup-tab setup-tab--activity ${activeTab === 'activities' ? 'setup-tab--active' : ''}`}
           onClick={() => setActiveTab('activities')}
         >
           Activities
