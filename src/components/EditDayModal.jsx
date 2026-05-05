@@ -97,10 +97,19 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   // mutation in this sheet flows through Save Changes, no exceptions.
   const [pendingBlockDeletes,  setPendingBlockDeletes]  = useState([]) // block ids
   const [pendingCustomDeletes, setPendingCustomDeletes] = useState([]) // names
+  // New blocks the user added via the builder modal. Each entry is
+  // `{ tempId, name }` — the tempId matches the synthetic id set on the
+  // staged block + its staged exercises in `draft`. handleSave runs
+  // createWorkoutBlock for each of these and remaps tempId → real id
+  // before saveProgram inserts the day's exercises.
+  const [pendingBlockCreates,  setPendingBlockCreates]  = useState([]) // [{ tempId, name }]
   // True whenever there's something to commit — either the visible draft
   // diverged from the snapshot or a staged DB op is queued. The Save button
   // and "Save day first" gating both depend on this.
-  const isDirty = draftDirty || pendingBlockDeletes.length > 0 || pendingCustomDeletes.length > 0
+  const isDirty = draftDirty
+    || pendingBlockDeletes.length > 0
+    || pendingCustomDeletes.length > 0
+    || pendingBlockCreates.length > 0
 
   useEffect(() => {
     if (open) {
@@ -109,6 +118,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
       setOpenSnapshot(JSON.stringify(fresh))
       setPendingBlockDeletes([])
       setPendingCustomDeletes([])
+      setPendingBlockCreates([])
       setError('')
     }
   }, [open, day])
@@ -149,14 +159,20 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     }))
   }
 
-  // Move within same item-type only (so exercises stay among exercises and
-  // activities stay among activities — sections aren't crossable).
+  // Move within same item-type AND same workout block. Crossing block
+  // boundaries used to silently put the moved row under a sibling block
+  // visually because the per-block render groups by workout_block_id while
+  // the swap happened on global index.
   const moveItem = (idx, dir) =>
     setDraft(prev => {
       const items = [...prev.exercises]
       const here = items[idx]
       let t = idx + dir
-      while (t >= 0 && t < items.length && items[t].item_type !== here.item_type) {
+      while (
+        t >= 0 && t < items.length &&
+        (items[t].item_type !== here.item_type ||
+         (items[t].workout_block_id || null) !== (here.workout_block_id || null))
+      ) {
         t += dir
       }
       if (t < 0 || t >= items.length) return prev
@@ -277,12 +293,10 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   const handleDeleteBlock = (block) => {
     if (!block?.id) return
     if (!window.confirm(`Delete "${block.name}" and all its exercises? This will be applied when you press Save changes.`)) return
-    // Stop a running rest timer if it was tracking this block — otherwise the
-    // floating pill would still point at a workout the user has marked for
-    // deletion.
-    if (getRestTimerState().blockId === block.id) stopRestTimer()
     // Stage the deletion + remove the block from the visible draft. Actual
-    // DB delete happens in handleSave when the user commits.
+    // DB delete happens in handleSave; the rest timer is also only stopped
+    // there — staging is reversible by closing the modal, so we mustn't
+    // touch external state until the commit lands.
     setPendingBlockDeletes(prev => prev.includes(block.id) ? prev : [...prev, block.id])
     setDraft(prev => ({
       ...prev,
@@ -291,35 +305,124 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     }))
   }
 
+  // Stage a new block from the WorkoutBuilderModal (deferred mode). The
+  // intent carries a temporary id; we inject the block + any seeded
+  // template exercises into draft so the UI updates immediately. handleSave
+  // creates the real block(s) and remaps tempId → real id before
+  // saveProgram inserts the staged exercises.
+  const handleStageBlockIntent = (intent) => {
+    if (!intent || !intent.isDeferred) {
+      // Backwards-compat: if a non-deferred block lands here (shouldn't,
+      // since EditDayModal passes defer=true), fall back to the old behavior
+      // of mirroring the real block id straight into the draft.
+      if (intent?.id) {
+        const seeded = (intent.seededExercises || []).map(e => ({
+          id:               e.id,
+          name:             e.name,
+          target:           e.target || '',
+          item_type:        'exercise',
+          track_mode:       e.track_mode || 'sets',
+          set_count:        e.set_count ?? 2,
+          activity_fields:  null,
+          superset_group:   e.superset_group || null,
+          workout_block_id: intent.id,
+        }))
+        setDraft(prev => ({
+          ...prev,
+          workout_blocks: [...(prev.workout_blocks || []), { id: intent.id, name: intent.name }],
+          exercises:      [...prev.exercises, ...seeded],
+        }))
+      }
+      return
+    }
+    // Deferred path — stage with a synthetic tempId.
+    const { tempId, name: blockName, templateExercises = [] } = intent
+    const seeded = templateExercises.map(e => ({
+      ...e,
+      workout_block_id: tempId,
+    }))
+    setDraft(prev => ({
+      ...prev,
+      workout_blocks: [...(prev.workout_blocks || []), {
+        id:           tempId,
+        name:         blockName,
+        rest_seconds: 90,
+        timer_enabled: true,
+        sort_order:   (prev.workout_blocks || []).length,
+        exercises:    seeded,
+      }],
+      exercises: [...prev.exercises, ...seeded],
+    }))
+    setPendingBlockCreates(prev => [...prev, { tempId, name: blockName }])
+  }
+
   const handleSave = async () => {
     if (!userId || !day) return
     setSaving(true)
     setError('')
+    // Local copies of staging state — cleared incrementally as each op
+    // succeeds so a partial-failure retry doesn't try to redo work that
+    // already landed (which would throw "row not found" on already-deleted
+    // blocks and leave the modal permanently broken).
+    let blockDeletesLeft  = [...pendingBlockDeletes]
+    let customDeletesLeft = [...pendingCustomDeletes]
+    let blockCreatesLeft  = [...pendingBlockCreates]
+    // tempId → real id, populated as we create deferred blocks.
+    const tempIdMap = {}
     try {
-      // 0) Apply staged block deletions first — cascades drop their exercises,
-      //    which is fine because saveProgram below re-deletes/inserts the
-      //    day's exercises anyway.
-      for (const id of pendingBlockDeletes) {
+      // 0) Create staged blocks first so the saveProgram payload below can
+      //    reference real block ids. Each successful create gets popped off
+      //    `blockCreatesLeft` immediately.
+      for (const intent of [...blockCreatesLeft]) {
+        const block = await createWorkoutBlock(day.id, intent.name, userId, {})
+        tempIdMap[intent.tempId] = block.id
+        blockCreatesLeft = blockCreatesLeft.filter(i => i.tempId !== intent.tempId)
+      }
+
+      // 0b) Apply staged block deletions. Each successful delete gets popped
+      //     so a retry after a partial failure doesn't re-attempt them.
+      for (const id of [...blockDeletesLeft]) {
         await deleteWorkoutBlock(id, userId)
+        // Stop the floating rest timer if it was tracking this just-deleted
+        // block — only at commit time, since staging a delete is reversible.
+        if (getRestTimerState().blockId === id) stopRestTimer()
+        blockDeletesLeft = blockDeletesLeft.filter(x => x !== id)
       }
 
-      // 0b) Apply staged custom-item deletions. Best-effort: if a row already
-      //     vanished (e.g. user removed it from a different day in another
-      //     tab), don't block the rest of the save.
-      for (const name of pendingCustomDeletes) {
+      // 0c) Apply staged custom-item deletions (best-effort — already-gone
+      //     rows are fine). Each clears off `customDeletesLeft` after
+      //     attempt so a retry doesn't loop on the same name.
+      for (const name of [...customDeletesLeft]) {
         try { await deleteCustomItem(name, userId) } catch { /* tolerate */ }
+        customDeletesLeft = customDeletesLeft.filter(n => n !== name)
       }
 
-      // 1) Persist per-block edits (name, rest_seconds). Skip blocks marked
-      //    for deletion — they're already gone above.
+      // 1) Build the merged draft: remap temp block ids → real ids on both
+      //    workout_blocks and exercises, and drop deleted blocks.
+      const remapId = (id) => (id != null && tempIdMap[id]) || id
+      const mergedDraft = {
+        ...draft,
+        workout_blocks: (draft.workout_blocks || [])
+          .filter(b => !pendingBlockDeletes.includes(b.id))
+          .map(b => ({ ...b, id: remapId(b.id) })),
+        exercises: (draft.exercises || []).map(e => ({
+          ...e,
+          workout_block_id: remapId(e.workout_block_id),
+        })),
+      }
+
+      // 2) Per-block updates (name, rest_seconds). Skip pending deletes and
+      //    pending creates (newly-created blocks just used the user's chosen
+      //    name on insert, no diff to apply).
       const originalById = Object.fromEntries(
         (day.workout_blocks || []).map(b => [b.id, b])
       )
       const blockUpdates = []
-      for (const b of (draft.workout_blocks || [])) {
+      for (const b of mergedDraft.workout_blocks) {
         if (!b.id) continue
         if (pendingBlockDeletes.includes(b.id)) continue
-        const orig = originalById[b.id] || {}
+        const orig = originalById[b.id]
+        if (!orig) continue // newly created above — no diff to apply
         const fields = {}
         if ((b.name || '').trim() !== (orig.name || '').trim()) {
           fields.name = (b.name || '').trim() || 'Workout'
@@ -333,17 +436,22 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
       }
       if (blockUpdates.length) await Promise.all(blockUpdates)
 
-      // 2) Persist the day (exercises + day meta). saveProgram requires the
-      //    full program, with this day's edits merged in.
-      const merged = program.map(d => d.id === day.id ? { ...draft } : d)
-      await saveProgram(merged, userId)
-      // Clear staging so the modal closes in a clean state — important for
-      // "Save day first" gating on the template chip.
+      // 3) Persist day-level state (exercises + day meta) via saveProgram.
+      const mergedProgram = program.map(d => d.id === day.id ? mergedDraft : d)
+      await saveProgram(mergedProgram, userId)
+      // Clear remaining staging only on full success.
       setPendingBlockDeletes([])
       setPendingCustomDeletes([])
+      setPendingBlockCreates([])
       await onSaved?.()
       onClose()
     } catch (e) {
+      // Persist whatever's still pending so a retry picks up where we left
+      // off — without this, a transient failure would forget the rest of
+      // the work and the user would have to redo it.
+      setPendingBlockDeletes(blockDeletesLeft)
+      setPendingCustomDeletes(customDeletesLeft)
+      setPendingBlockCreates(blockCreatesLeft)
       setError(e?.message || 'Save failed — please try again.')
     } finally {
       setSaving(false)
@@ -642,6 +750,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
           createPlaceholder={pickerKind === 'activity' ? 'Activity name' : 'Exercise name'}
           yourGroupLabel={pickerYour}
           kind={pickerKind === 'activity' ? 'activity' : 'workout'}
+          deleteConfirmBody="Removes it from your program when you press Save changes. Close this sheet without saving to undo. Past workout history is preserved."
           onDeleteCustom={async (name) => {
             // Stage only — the actual DB delete runs in handleSave so closing
             // the modal without saving cleanly reverts the change.
@@ -664,46 +773,9 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
         open={builderOpen}
         dayId={day?.id}
         userId={userId}
+        defer
         onClose={() => setBuilderOpen(false)}
-        onCreated={(block) => {
-          // Append the new block to the local draft so it shows up instantly.
-          // The DB write already happened inside WorkoutBuilderModal — we
-          // intentionally don't trigger onSaved here because that refetches
-          // `day` from above and would clobber any in-modal edits the user
-          // makes next. Save Changes is what syncs the parent.
-          //
-          // CRITICAL: when the block was seeded from a template, the seeded
-          // exercise rows must also land in draft.exercises. saveProgram
-          // deletes-then-reinserts based on draft.exercises, so anything not
-          // mirrored here would be wiped on Save.
-          if (block?.id) {
-            const seeded = (block.seededExercises || []).map(e => ({
-              id:               e.id,
-              name:             e.name,
-              target:           e.target || '',
-              item_type:        e.item_type || 'exercise',
-              track_mode:       e.track_mode || 'sets',
-              set_count:        e.set_count ?? 2,
-              activity_fields:  Array.isArray(e.activity_fields) ? e.activity_fields : null,
-              superset_group:   e.superset_group || null,
-              workout_block_id: block.id,
-              has_drop_sets:    !!e.has_drop_sets,
-              drop_set_mode:    e.drop_set_mode || (e.has_drop_sets ? 'all' : 'off'),
-            }))
-            setDraft(prev => ({
-              ...prev,
-              exercises: [...(prev.exercises || []), ...seeded],
-              workout_blocks: [...(prev.workout_blocks || []), {
-                id:            block.id,
-                name:          block.name,
-                sort_order:    block.sort_order,
-                rest_seconds:  block.rest_seconds ?? 90,
-                timer_enabled: block.timer_enabled ?? true,
-                exercises:     seeded,
-              }],
-            }))
-          }
-        }}
+        onCreated={handleStageBlockIntent}
       />
 
       {infoOpen && (

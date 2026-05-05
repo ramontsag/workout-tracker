@@ -6,11 +6,16 @@ import { createWorkoutBlock, getTemplates } from '../supabase'
 //
 // Props:
 //   - open: boolean
-//   - dayId: training_day_id where the block will live
+//   - dayId: training_day_id where the block will live (only used in immediate mode)
 //   - userId
 //   - onClose
-//   - onCreated(block): called with the new block { id, name } once saved
-export default function WorkoutBuilderModal({ open, dayId, userId, onClose, onCreated }) {
+//   - onCreated(block): called with the new block once committed.
+//   - defer (default false): when true, the modal does NOT write to the DB —
+//     it resolves template exercises client-side and returns an INTENT
+//     `{ tempId, name, templateExercises }` for the parent to stage. Used by
+//     EditDayModal so "Add a workout" only commits when Save Changes is
+//     pressed; closing without save discards the intent.
+export default function WorkoutBuilderModal({ open, dayId, userId, onClose, onCreated, defer = false }) {
   const [name, setName]               = useState('')
   const [mode, setMode]               = useState('blank')   // 'blank' | 'template'
   const [templates, setTemplates]     = useState([])
@@ -46,14 +51,37 @@ export default function WorkoutBuilderModal({ open, dayId, userId, onClose, onCr
     setSaving(true)
     setError('')
     try {
-      const block = await createWorkoutBlock(
-        dayId,
-        trimmed,
-        userId,
-        mode === 'template' ? { fromTemplateId: selectedTpl } : {},
-      )
-      onCreated && onCreated(block)
-      onClose && onClose()
+      if (defer) {
+        // Build the intent locally — no DB write. Parent will stage and
+        // commit on Save Changes.
+        let templateExercises = []
+        if (mode === 'template' && selectedTpl) {
+          // Templates are already loaded into state — pluck the chosen one.
+          const tpl = templates.find(t => t.id === selectedTpl)
+          templateExercises = (tpl?.exercises || [])
+            .filter(e => (e.item_type || 'exercise') !== 'activity')
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map(e => ({
+              name:       e.exercise_name,
+              target:     e.target || '',
+              item_type:  'exercise',
+              track_mode: 'sets',
+              set_count:  2,
+            }))
+        }
+        const tempId = `temp-${Math.random().toString(36).slice(2)}-${Date.now()}`
+        onCreated && onCreated({ tempId, name: trimmed, templateExercises, isDeferred: true })
+        onClose && onClose()
+      } else {
+        const block = await createWorkoutBlock(
+          dayId,
+          trimmed,
+          userId,
+          mode === 'template' ? { fromTemplateId: selectedTpl } : {},
+        )
+        onCreated && onCreated(block)
+        onClose && onClose()
+      }
     } catch (e) {
       setError(e.message)
     } finally {

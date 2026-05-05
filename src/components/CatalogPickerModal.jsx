@@ -33,6 +33,10 @@ export default function CatalogPickerModal({
   // 'workout' (orange) or 'activity' (cyan) — themes the Create button so
   // it matches the kind of catalog we're picking from.
   kind              = 'workout',
+  // Optional override for the delete-confirm body. EditDayModal passes a
+  // hint that the deletion is staged ("will apply when you Save changes")
+  // so the dialog text matches the actual semantics in that surface.
+  deleteConfirmBody = null,
 }) {
   const [query, setQuery] = useState('')
   const [openGroup, setOpenGroup] = useState(null)
@@ -221,7 +225,8 @@ export default function CatalogPickerModal({
           <div className="confirm-card" onClick={e => e.stopPropagation()}>
             <div className="confirm-title">Delete "{confirmDelete}"?</div>
             <p className="confirm-body">
-              This will remove it from your program AND every workout entry you've ever logged for it. This can't be undone.
+              {deleteConfirmBody
+                || 'Removes it from your program. Past workout history is preserved.'}
             </p>
             {deleteError && <div className="err-msg" style={{ marginBottom: 8 }}>{deleteError}</div>}
             <div className="confirm-actions">
