@@ -3808,29 +3808,49 @@ select.field-input option { background: #141414; color: #e0e0e0; }
    visible viewport on phones with browser chrome — was 92vh, which pushed
    the CTA so close to the bottom edge it felt cropped. */
 .edit-day-sheet { max-height: 88vh; }
-/* Top-right Save shortcut — mirrors the bottom CTA so the user can save
-   without scrolling to the end of the form. Only reads "Save" so it stays
-   compact next to the close ×; disabled when the form is clean. */
-.header-save-btn {
+/* Single Save Changes action bar — pinned right under the header so it
+   stays in view as the user scrolls through long days. Replaced both the
+   compact header pill and the bottom-pinned CTA: now the only commit
+   surface in the modal, so there's no ambiguity about where to save. */
+.edit-day-action-bar {
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.edit-day-save-btn {
+  width: 100%;
+  padding: 12px 16px;
   background: var(--accent);
   color: #fff;
   border: none;
-  border-radius: 7px;
-  padding: 6px 12px;
-  font-size: 12px;
+  border-radius: 10px;
+  font-size: 14px;
   font-weight: 800;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, background 0.15s;
+  box-shadow: 0 4px 14px rgba(255, 85, 0, 0.25);
 }
-.header-save-btn:active   { opacity: 0.85; }
-.header-save-btn:disabled { opacity: 0.35; cursor: default; }
+.edit-day-save-btn:hover  { background: #ff6b1f; }
+.edit-day-save-btn:active { opacity: 0.85; }
+.edit-day-save-btn:disabled {
+  background: var(--surface3);
+  color: var(--text-muted);
+  box-shadow: none;
+  cursor: default;
+  letter-spacing: 0.3px;
+}
 .edit-day-body {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 16px;
+  /* Bottom padding stacks the iOS safe-area inset on top of breathing room
+     so the last form control never touches the bottom edge of the sheet. */
+  padding: 12px 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
 }
 .field-label-hint {
   font-weight: 400;

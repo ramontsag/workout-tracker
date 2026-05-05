@@ -363,13 +363,23 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
             aria-label="How this works"
             title="How this works"
           >ⓘ</button>
+          <button className="picker-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+
+        {/* Sticky action bar — single source of truth for committing edits.
+            Pinned right under the header so it's reachable without scrolling
+            to the bottom of long days. Disabled until something is dirty so
+            it never reads "Save changes" when nothing's changed. */}
+        <div className="edit-day-action-bar">
           <button
-            className="header-save-btn"
+            className="edit-day-save-btn"
             onClick={handleSave}
             disabled={saving || !isDirty}
-            title={isDirty ? 'Save changes' : 'No unsaved changes'}
-          >{saving ? 'Saving…' : 'Save'}</button>
-          <button className="picker-close" onClick={onClose} aria-label="Close">×</button>
+          >
+            {saving       ? 'Saving…'
+             : !isDirty   ? 'No unsaved changes'
+             :              'Save changes'}
+          </button>
         </div>
 
         <div className="edit-day-body">
@@ -614,12 +624,6 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
           })()}
 
           {error && <p className="err-msg">{error}</p>}
-        </div>
-
-        <div className="picker-create">
-          <button className="picker-create-btn" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
         </div>
       </div>
 
