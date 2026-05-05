@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useId } from 'react'
 import { getBodyWeightLogs, logBodyWeight, getWeeklyProgress, getInProgressDayIds } from '../supabase'
 import { displayWeight, parseInputWeight, unitLabel } from '../utils/units'
 import EditDayModal from './EditDayModal'
@@ -41,9 +41,11 @@ function EnergyRing({ completed, target }) {
                    : capped >= 1 ? 'energy-ring--done'
                    : ''
 
-  // Per-instance gradient ID so multiple rings on the same screen don't
-  // collide on the same <defs> id.
-  const gradId = `er-grad-${target}-${completed}`
+  // Stable per-instance gradient id (via useId) so the <defs> reference
+  // doesn't churn when `completed` changes — that would abort the in-flight
+  // stroke-dashoffset transition and the arc would snap instead of tween.
+  const reactId = useId()
+  const gradId = `er-grad-${reactId.replace(/:/g, '')}`
 
   return (
     <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}
@@ -123,7 +125,12 @@ function weeklyMessage(completed, target, workouts, activities) {
 export default function Home({ program, userId, profile, onSelectDay, onProfile, onProgramUpdated }) {
   const unit = profile?.weight_unit || 'kg'
   const label = unitLabel(unit)
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'long' })
+  // Hardcoded English weekday names — toLocaleDateString returns
+  // locale-dependent strings on some Android WebViews (and old Safari),
+  // which then fail to match the day.name strings we store in English.
+  // Indexing into DAY_ORDER keeps today match locale-stable.
+  const todayIdx = (new Date().getDay() + 6) % 7  // 0 = Mon, … 6 = Sun
+  const today = DAY_ORDER[todayIdx]
 
   const [lastWeight,     setLastWeight]     = useState(null)
   const [showForm,       setShowForm]       = useState(false)
@@ -294,7 +301,9 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
       ) : (
         <div className="day-grid">
           {sorted.map((day, i) => {
-            const isToday   = day.name.toLowerCase() === today.toLowerCase()
+            const dayIdx    = DAY_ORDER.indexOf(day.name)
+            const isToday   = dayIdx === todayIdx
+            const isPast    = dayIdx >= 0 && dayIdx < todayIdx
             const items     = day.exercises || []
             const blocks    = day.workout_blocks || []
             const exItems   = items.filter(e => e.item_type !== 'activity')
@@ -310,27 +319,24 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
             const isGymOnly  = blockCount > 0 && actCount === 0
             const isActOnly  = blockCount === 0 && actCount > 0
 
-            // Title: hybrid → "Hybrid"; workout-only → join block names;
-            // activity-only → join activity names; empty → "Rest day".
+            // Title rules (UI cleanup):
+            //   - empty                 → "Rest day"
+            //   - hybrid (any mix)      → "Hybrid" (purple)
+            //   - exactly 1 workout     → that workout's name
+            //   - exactly 1 activity    → that activity's name
+            //   - 2+ workouts only      → "N workouts"
+            //   - 2+ activities only    → "N activities"
+            // The point: only show a SPECIFIC name when there's only one item;
+            // otherwise show a count so the card stays compact.
             let dayTitle
-            if (isEmpty)        dayTitle = 'Rest day'
-            else if (isHybrid)  dayTitle = 'Hybrid'
-            else if (isGymOnly) dayTitle = populatedBlocks.length
-              ? populatedBlocks.map(b => b.name).join(' · ')
-              : (day.focus?.trim() || 'Workout')
-            else                dayTitle = actItems.map(a => a.name).join(' · ')
-
-            let countLabel
-            if (isHybrid)
-              countLabel = `${blockCount} workout${blockCount !== 1 ? 's' : ''} · ${actCount} activit${actCount !== 1 ? 'ies' : 'y'}`
-            else if (isGymOnly && blockCount > 1)
-              countLabel = `${blockCount} workouts · ${exCount} lift${exCount !== 1 ? 's' : ''}`
-            else if (isGymOnly)
-              countLabel = `${exCount} lift${exCount !== 1 ? 's' : ''}`
-            else if (isActOnly)
-              countLabel = `${actCount} activit${actCount !== 1 ? 'ies' : 'y'}`
-            else
-              countLabel = ''
+            if (isEmpty)         dayTitle = 'Rest day'
+            else if (isHybrid)   dayTitle = 'Hybrid'
+            else if (isGymOnly)  dayTitle = blockCount === 1
+              ? (populatedBlocks[0]?.name || day.focus?.trim() || 'Workout')
+              : `${blockCount} workouts`
+            else                 dayTitle = actCount === 1
+              ? actItems[0].name
+              : `${actCount} activities`
 
             const indicatorType = isEmpty ? 'empty'
               : isHybrid ? 'hybrid'
@@ -357,9 +363,12 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
             })()
             const offScheduleActual = dedupedActual.filter(a => !a.onSchedule)
             const onScheduleActual  = dedupedActual.filter(a =>  a.onSchedule)
-            // "Override" = this calendar day has work logged, but NONE of it
-            // was from this day's plan. Triggers the dimmed title + tinted ✓.
-            const isOverridden = isDone && onScheduleActual.length === 0
+            // "Override" = this calendar day has PLANNED items but the user
+            // did none of them and instead logged something off-schedule.
+            // Skip on empty/rest days — striking through "Rest day" reads
+            // wrong when the rest was correctly observed before the
+            // off-schedule pill was added.
+            const isOverridden = isDone && !isEmpty && onScheduleActual.length === 0
             const overrideKind = isOverridden && offScheduleActual.length
               ? (offScheduleActual.some(a => a.kind === 'workout') ? 'workout' : 'activity')
               : null
@@ -375,7 +384,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
             return (
               <div
                 key={day.id}
-                className={`day-card ${typeClass}${isToday ? ' day-card--today' : ''}`}
+                className={`day-card ${typeClass}${isToday ? ' day-card--today' : ''}${isPast ? ' day-card--past' : ''}`}
                 style={{ animationDelay: `${i * 50}ms` }}
                 role="button"
                 tabIndex={0}
@@ -398,29 +407,29 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                       title="Edit day"
                     >Edit</button>
                   </div>
-                  <div className={`day-card__focus${isOverridden ? ' day-card__focus--overridden' : ''}`}>{dayTitle}</div>
-                  {countLabel && (
-                    <div className={`day-card__count${isOverridden ? ' day-card__count--overridden' : ''}`}>{countLabel}</div>
-                  )}
-                  {/* "Did:" pills — what was actually done on this CALENDAR
-                      day but NOT part of this day's plan (e.g. Sunday's
-                      workout done on Monday). Loud styling + a "DID" label so
-                      they dominate the (now-dimmed) planned title when the
-                      day was overridden. */}
-                  {offScheduleActual.length > 0 && (
-                    <div className="day-card__actual">
-                      <span className="day-card__actual-label" aria-label="Actually did">↳</span>
-                      {offScheduleActual.map((a, k) => (
-                        <span
-                          key={k}
-                          className={`day-card__actual-pill day-card__actual-pill--${a.kind}`}
-                          title={`Actually done on ${day.name}`}
-                        >
-                          ✓ {a.label}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  {/* Title row — the planned title sits inline with off-schedule
+                      "↳ ✓ Pull A" pills so they live on the same line and
+                      flow-wrap when the day's full of activity. The planned
+                      title dims + struck-through when nothing planned was done. */}
+                  <div className="day-card__focus-row">
+                    <span className={`day-card__focus${isOverridden ? ' day-card__focus--overridden' : ''}`}>
+                      {dayTitle}
+                    </span>
+                    {offScheduleActual.length > 0 && (
+                      <>
+                        <span className="day-card__actual-arrow" aria-label="Actually did">↳</span>
+                        {offScheduleActual.map((a, k) => (
+                          <span
+                            key={k}
+                            className={`day-card__actual-pill day-card__actual-pill--${a.kind}`}
+                            title={`Actually done on ${day.name}`}
+                          >
+                            ✓ {a.label}
+                          </span>
+                        ))}
+                      </>
+                    )}
+                  </div>
                 </div>
                 <div className="day-card__indicator-wrap">
                   {showBadge && (
@@ -430,7 +439,11 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                     >{doneItems}/{totalItems}</span>
                   )}
                   <div className={`day-card__indicator-circle day-card__indicator-circle--${indicatorType}${isDone ? ' day-card__indicator-circle--done' : ''}${overrideKind ? ` day-card__indicator-circle--override-${overrideKind}` : ''}`}
-                    title={isDone ? `Completed ${doneItems}/${totalItems} this week` : undefined}
+                    title={isDone
+                      ? (totalItems > 0
+                          ? `Completed ${doneItems}/${totalItems} this week`
+                          : 'Completed off-schedule work')
+                      : undefined}
                     aria-label={isDone ? 'Completed' : undefined}
                   >
                     {isDone

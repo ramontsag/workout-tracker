@@ -205,13 +205,14 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
   // Each workout block is its own session. Activities are independent items.
   const blocks        = day.workout_blocks || []
   const activityItems = (day.exercises || []).filter(e => e.item_type === 'activity')
-  // Day kind for color theming the header Edit button. Mirrors the rule used
-  // on Home day cards so the Edit button is orange on workout-only days,
-  // cyan on activity-only days, purple when both, grey on empty.
-  const populatedBlocks = blocks.filter(b => (b.exercises || []).length > 0)
-  const dayKind = (populatedBlocks.length === 0 && activityItems.length === 0) ? 'empty'
-    : (populatedBlocks.length > 0 && activityItems.length > 0) ? 'hybrid'
-    : populatedBlocks.length > 0 ? 'gym'
+  // Day kind for color theming the header Edit button. Counts ANY block as
+  // a workout intent (even empty ones the user just created) — that way the
+  // header pill matches the Workout section that always renders for blocks
+  // below. Home uses populatedBlocks because empty blocks shouldn't change
+  // the day's planned label there; here we want to acknowledge intent.
+  const dayKind = (blocks.length === 0 && activityItems.length === 0) ? 'empty'
+    : (blocks.length > 0 && activityItems.length > 0) ? 'hybrid'
+    : blocks.length > 0 ? 'gym'
     : 'rest'
 
   // Per-week completion state, keyed by block id (for workouts) and activity
@@ -290,15 +291,28 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
     const elevM = log.elevation_display === '' || log.elevation_display == null
       ? null
       : parseInputElevation(log.elevation_display, unit)
+    // Numeric fields were going to the DB as raw strings — Postgres tolerates
+    // numeric strings but blank strings would either error or coerce
+    // inconsistently. Parse everything before save; treat blanks as null.
+    const numOrNull = (v) => {
+      if (v === '' || v == null) return null
+      const n = typeof v === 'number' ? v : parseFloat(v)
+      return isNaN(n) ? null : n
+    }
+    const intOrNull = (v) => {
+      if (v === '' || v == null) return null
+      const n = typeof v === 'number' ? v : parseInt(v)
+      return isNaN(n) ? null : n
+    }
     const canonical = {
       checked:      true,
-      notes:        log.notes,
-      duration_min: log.duration_min,
+      notes:        log.notes || '',
+      duration_min: numOrNull(log.duration_min),
       distance_km:  isNaN(distKm) ? null : distKm,
-      intensity:    log.intensity,
-      avg_hr:       log.avg_hr,
-      calories:     log.calories,
-      rounds:       log.rounds,
+      intensity:    intOrNull(log.intensity),
+      avg_hr:       intOrNull(log.avg_hr),
+      calories:     numOrNull(log.calories),
+      rounds:       intOrNull(log.rounds),
       elevation_m:  isNaN(elevM) ? null : elevM,
     }
     setActivitySaving(prev => ({ ...prev, [name]: true }))

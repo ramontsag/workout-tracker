@@ -423,21 +423,35 @@ a { color: inherit; text-decoration: none; }
 .day-card--rest  .day-card__name  { color: #aaaaaa; }
 .day-card--empty .day-card__name  { color: #666666; }
 
+/* Title row — focus text + inline off-schedule arrow + pill(s).
+   Wraps onto a second visual line when content is long; on narrow viewports
+   the small arrow + one pill usually still fit inline. */
+.day-card__focus-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .day-card__focus {
   font-size: 13px;
   font-weight: 600;
-  margin-bottom: 5px;
   letter-spacing: 0.2px;
+  min-width: 0;
 }
 .day-card--gym    .day-card__focus { color: #FF5500; }
 .day-card--rest   .day-card__focus { color: #00C2A8; }
 .day-card--hybrid .day-card__focus { color: var(--hybrid); }
 .day-card--empty  .day-card__focus { color: #555555; }
 
-.day-card__count {
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 0.3px;
+/* Past days fade slightly — eye lands on today first, but past completion
+   ✓s and pills are still readable. Only opacity is touched so the kind
+   colors stay correct underneath. */
+.day-card--past {
+  opacity: 0.66;
+}
+.day-card--past.day-card--today {
+  opacity: 1;
 }
 
 /* Right-side indicator circle */
@@ -462,39 +476,31 @@ a { color: inherit; text-decoration: none; }
   padding: 2px 7px;
   line-height: 1.2;
 }
-/* "Actual" pills — render under the day name/focus when work was logged on
-   this calendar day but not as part of this day's plan (e.g. Sunday's
-   workout done on Monday). Loud enough to dominate the planned title
-   when divergence happens, since the planned title no longer reflects
-   reality on those days. */
-.day-card__actual {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-  margin-top: 8px;
-}
-.day-card__actual-label {
-  font-size: 14px;
+/* "Actual" pills — sit INLINE with the planned focus title, prefixed by a
+   small grey ↳ arrow. Reads as: "Push A ↳ ✓ Pull A" — instead of "did Push,"
+   the user did Pull. The arrow is small + grey so it doesn't compete with
+   the kind-colored pill. Keeps every off-schedule pill on the focus row,
+   not on a second row, so the day card stays compact. */
+.day-card__actual-arrow {
+  font-size: 13px;
   font-weight: 600;
   color: #6b7280;
   line-height: 1;
-  margin-right: 2px;
   opacity: 0.85;
+  margin-left: 1px;
 }
 .day-card__actual-pill {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.2px;
-  padding: 3px 9px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: rgba(0, 194, 168, 0.22);
-  border: 1px solid rgba(0, 194, 168, 0.65);
+  border: 1px solid rgba(0, 194, 168, 0.6);
   color: #8FEEDC;
   white-space: nowrap;
-  line-height: 1.3;
+  line-height: 1.4;
   animation: actualPillPop 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-  box-shadow: 0 0 0 0 rgba(0, 194, 168, 0.0);
 }
 .day-card__actual-pill--workout {
   background: rgba(255, 85, 0, 0.22);
@@ -4544,7 +4550,13 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   align-items: center;
   gap: 10px;
 }
-.day-card__name-row .day-card__name { flex: 0 0 auto; }
+.day-card__name-row .day-card__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .day-card__edit {
   padding: 3px 10px;
   border-radius: 99px;
