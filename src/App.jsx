@@ -105,6 +105,12 @@ export default function App() {
 
         } else if (event === 'SIGNED_OUT') {
           setUser(null); setProgram([]); setActiveDay(null); setTotalWorkouts(null); setTotalActivities(null); setProfile(null)
+          // Clear every cross-screen pointer too — without these the next
+          // user could land on a screen pre-populated from the previous
+          // account (e.g. exercise history of someone else's lift).
+          setActiveBlock(null)
+          setActiveExercise(null)
+          setEditingCompletedId(null)
           // Tear down floating-pill state so the next user doesn't inherit
           // the previous account's in-progress workout / rest timer.
           stopRestTimer()
@@ -120,14 +126,15 @@ export default function App() {
   // Tap on the floating timer pill — jumps back to the workout that started
   // it. Validates the day AND the block still exist in the current program;
   // if either is gone (e.g. block was deleted via Edit Day after the timer
-  // started), stop the timer and stay put rather than landing on something stale.
+  // started), tear down BOTH the rest timer AND the active-workout pill so
+  // the pill disappears instead of pointing at a deleted block.
   const handleFloatingTimerTap = (dayId, blockId) => {
     const day = dayId ? program.find(d => d.id === dayId) : null
-    if (!day) { stopRestTimer(); return }
+    if (!day) { stopRestTimer(); clearActiveWorkout(); return }
     const block = blockId
       ? (day.workout_blocks || []).find(b => b.id === blockId)
       : null
-    if (blockId && !block) { stopRestTimer(); return }
+    if (blockId && !block) { stopRestTimer(); clearActiveWorkout(); return }
     setActiveDay(day)
     setActiveBlock(block || null)
     go('workout')
@@ -144,6 +151,30 @@ export default function App() {
     window.addEventListener('wt:goto-active-workout', onGoto)
     return () => window.removeEventListener('wt:goto-active-workout', onGoto)
   }, [program]) // eslint-disable-line
+
+  // Validate the floating-pill active-workout against the current program.
+  // If the day or block referenced by the pill no longer exists (likely
+  // deleted via EditDayModal mid-workout), clear the singleton so the pill
+  // disappears instead of pointing nowhere. Same for the rest timer.
+  useEffect(() => {
+    if (!program?.length) return
+    // Lazy import via dynamic require would be cleaner, but the store
+    // exports getState synchronously — fine to call here.
+    import('./activeWorkoutStore').then(({ getState: getActive }) => {
+      const a = getActive()
+      if (!a.active) return
+      const day = a.dayId ? program.find(d => d.id === a.dayId) : null
+      const blockOk = !a.blockId || (day?.workout_blocks || []).some(b => b.id === a.blockId)
+      if (!day || !blockOk) clearActiveWorkout()
+    }).catch(() => {})
+    import('./restTimerStore').then(({ getState: getTimer }) => {
+      const t = getTimer()
+      if (!t.active) return
+      const day = t.dayId ? program.find(d => d.id === t.dayId) : null
+      const blockOk = !t.blockId || (day?.workout_blocks || []).some(b => b.id === t.blockId)
+      if (!day || !blockOk) stopRestTimer()
+    }).catch(() => {})
+  }, [program])
 
   // ── Render ────────────────────────────────────────────────────
   const renderScreen = () => {

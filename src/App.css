@@ -572,21 +572,6 @@ a { color: inherit; text-decoration: none; }
   line-height: 1;
 }
 
-/* Legacy — keep for any leftover references */
-.day-card__top   { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.day-card__body  { margin-top: 4px; }
-.day-card__badge { display: none; }
-.day-card__exercises { display: flex; flex-wrap: wrap; gap: 5px; }
-.day-card__ex-chip {
-  font-size: 11px;
-  color: var(--text-muted);
-  background: var(--surface3);
-  border-radius: 6px;
-  padding: 3px 8px;
-  letter-spacing: 0.2px;
-}
-.day-card__ex-more { color: var(--accent); background: transparent; }
-
 /* ── Workout Header ───────────────────────────────── */
 .workout-sticky-top {
   position: sticky;
@@ -2939,7 +2924,10 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .floating-pills {
   position: fixed;
   left: 50%;
-  bottom: 24px;
+  /* Sit above the iOS home indicator. Was 24px hardcoded → on iPhones with
+     the home gesture bar (safe-area ~34px), the pill rendered partially
+     beneath it. */
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 1000;
   display: flex;
