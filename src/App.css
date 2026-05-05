@@ -2241,20 +2241,30 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 
 .tpl-save-chip {
   margin-left: auto;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
   text-transform: uppercase;
   color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--accent);
-  border-radius: 5px;
-  padding: 4px 9px;
+  background: rgba(255, 85, 0, 0.12);
+  border: 1.5px solid var(--accent);
+  border-radius: 8px;
+  padding: 9px 12px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, opacity 0.15s;
 }
-.tpl-save-chip:active   { opacity: 0.6; }
+.tpl-save-chip:hover    { background: rgba(255, 85, 0, 0.2); }
+.tpl-save-chip:active   { opacity: 0.7; }
 .tpl-save-chip:disabled { opacity: 0.5; cursor: default; }
+/* Inside the block card, this is a primary action — full-width and visually
+   weighty so the user can find "save this as a template" at a glance. */
+.block-card__tpl {
+  margin-top: 12px;
+  width: 100%;
+  font-size: 13px;
+  padding: 11px 12px;
+}
 
 /* Workout block card inside Edit Day */
 .block-card {
@@ -2323,11 +2333,6 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   padding: 6px 12px;
   font-size: 13px;
 }
-.block-card__tpl {
-  margin-top: 10px;
-  width: 100%;
-}
-
 /* Workout builder modal */
 .builder-card { max-width: 460px; }
 .builder-tabs {
@@ -3511,7 +3516,9 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .picker-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 16px 0;
+  /* Bottom padding includes iOS safe-area + breathing room so the last
+     catalog item never sits flush with the sheet's bottom edge. */
+  padding: 8px 16px calc(env(safe-area-inset-bottom, 0px) + 14px);
 }
 .picker-empty {
   padding: 20px 0;
@@ -3647,11 +3654,34 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 
 .picker-create {
   border-top: 1px solid var(--border);
-  /* Bottom padding stacks the iOS safe-area inset on top of an extra 18px so
-     the primary CTA never visually merges into the phone's bottom edge. */
-  padding: 14px 16px calc(env(safe-area-inset-bottom, 0px) + 18px);
+  /* Stack the iOS safe-area inset on top of a small extra so the CTA never
+     merges into the phone's bottom edge — kept compact so the button sits
+     visibly above the bottom rather than feeling lost there. */
+  padding: 12px 16px calc(env(safe-area-inset-bottom, 0px) + 10px);
   background: var(--surface);
 }
+/* Hoisted Create button — sits below search at the top of the picker so it
+   never gets buried beneath the catalog. Less heavyweight than the primary
+   bottom CTA so it doesn't fight for attention with category items. */
+.picker-create-top {
+  padding: 8px 16px 4px;
+}
+.picker-create-btn-alt {
+  width: 100%;
+  padding: 10px;
+  background: rgba(255, 85, 0, 0.10);
+  color: var(--accent);
+  border: 1px dashed rgba(255, 85, 0, 0.55);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.picker-create-btn-alt:active { opacity: 0.85; }
+.picker-create-btn-alt:hover  { background: rgba(255, 85, 0, 0.16); }
 .picker-create-btn {
   width: 100%;
   padding: 12px;
@@ -3701,7 +3731,29 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 }
 
 /* ── Edit Day modal ──────────────────────────────────── */
-.edit-day-sheet { max-height: 92vh; }
+/* Constrain to 88vh so the "Save changes" footer sits well within the
+   visible viewport on phones with browser chrome — was 92vh, which pushed
+   the CTA so close to the bottom edge it felt cropped. */
+.edit-day-sheet { max-height: 88vh; }
+/* Top-right Save shortcut — mirrors the bottom CTA so the user can save
+   without scrolling to the end of the form. Only reads "Save" so it stays
+   compact next to the close ×; disabled when the form is clean. */
+.header-save-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.15s;
+}
+.header-save-btn:active   { opacity: 0.85; }
+.header-save-btn:disabled { opacity: 0.35; cursor: default; }
 .edit-day-body {
   flex: 1;
   overflow-y: auto;
@@ -4139,17 +4191,25 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   border-color: rgba(0, 194, 168, 0.5);
 }
 
-/* Workout-logging inline activity fields */
+/* Workout-logging inline activity fields. 2-col grid with explicit
+   min-width:0 on grid items + the input wrap so wide values (e.g.
+   "12345.67 km") never push the cell wider than its track and overflow the
+   card. On narrow screens (≤360px), fall back to a single column so labels
+   never collide with the input. */
 .activity-log-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 8px;
+}
+@media (max-width: 360px) {
+  .activity-log-grid { grid-template-columns: 1fr; }
 }
 .activity-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 .activity-field--wide { grid-column: 1 / -1; }
 .activity-field-label {
@@ -4164,10 +4224,12 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   background: var(--surface3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 0 10px;
+  padding: 0 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 .activity-field-input {
-  flex: 1;
+  flex: 1 1 0;
   background: transparent;
   border: none;
   outline: none;
@@ -4176,12 +4238,14 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   min-width: 0;
+  width: 100%;
 }
 .activity-field-suffix {
   font-size: 11px;
   color: var(--text-muted);
   margin-left: 6px;
   letter-spacing: 0.3px;
+  flex-shrink: 0;
 }
 
 /* 1–5 intensity dot picker */

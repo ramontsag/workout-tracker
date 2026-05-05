@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   getLastSession, getPreviousSessionVolume, saveTemplate, getExerciseBests,
   getInProgressWorkout, upsertDraft, discardDraft,
-  addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames,
+  addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames, getAllKnownActivityNames,
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
   insertCompletedSession, updateCompletedSession, completeWorkout,
   getTemplates, getLastSetsByExercise, updateExerciseSetCount,
@@ -856,7 +856,8 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   // Popup shown right after a pick — asks whether to also persist this item
   // to the day's program permanently.  null when not asking.
   const [addToProgramPrompt, setAddToProgramPrompt] = useState(null)  // { picked } | null
-  const [knownNames,    setKnownNames]    = useState([])
+  const [knownExerciseNames, setKnownExerciseNames] = useState([])
+  const [knownActivityNames, setKnownActivityNames] = useState([])
   const [removeTarget,  setRemoveTarget]  = useState(null)  // { name, alsoProgram }
   const [editDayOpen,   setEditDayOpen]   = useState(false)
   const [menuOpen,      setMenuOpen]      = useState(false)
@@ -1521,11 +1522,11 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   // the user's known names so the "Your X" group renders.
   const openAddPicker = async (kind) => {
     setPickerKind(kind)
-    if (knownNames.length === 0 && userId) {
-      try {
-        const names = await getAllKnownExerciseNames(userId)
-        setKnownNames(names)
-      } catch { /* non-fatal */ }
+    if (!userId) return
+    if (kind === 'activity' && knownActivityNames.length === 0) {
+      try { setKnownActivityNames(await getAllKnownActivityNames(userId)) } catch { /* non-fatal */ }
+    } else if (kind === 'exercise' && knownExerciseNames.length === 0) {
+      try { setKnownExerciseNames(await getAllKnownExerciseNames(userId)) } catch { /* non-fatal */ }
     }
   }
 
@@ -2382,16 +2383,18 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           onClose={() => setPickerKind(null)}
           onPick={handlePickItem}
           catalog={pickerKind === 'activity' ? ACTIVITY_CATALOG : EXERCISE_CATALOG}
-          userKnownNames={knownNames}
-          existingNames={exerciseList.map(e => e.name)}
+          userKnownNames={pickerKind === 'activity' ? knownActivityNames : knownExerciseNames}
+          existingNames={exerciseList
+            .filter(e => (e.item_type === 'activity') === (pickerKind === 'activity'))
+            .map(e => e.name)}
           title={pickerKind === 'activity' ? 'Add activity' : 'Add exercise'}
           createLabel={pickerKind === 'activity' ? '+ Create your own activity' : '+ Create your own exercise'}
           createPlaceholder={pickerKind === 'activity' ? 'Activity name' : 'Exercise name'}
           yourGroupLabel={pickerKind === 'activity' ? 'Your activities' : 'Your exercises'}
           onDeleteCustom={async (name) => {
             await deleteCustomItem(name, userId)
-            setKnownNames(prev => prev.filter(n => n.toLowerCase() !== name.toLowerCase()))
-            // If the deleted name is currently in the workout, drop it.
+            const setter = pickerKind === 'activity' ? setKnownActivityNames : setKnownExerciseNames
+            setter(prev => prev.filter(n => n.toLowerCase() !== name.toLowerCase()))
             setExerciseList(prev => prev.filter(e => e.name !== name))
           }}
         />

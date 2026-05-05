@@ -4,8 +4,9 @@ import {
   getInProgressWorkout,
   insertCompletedSession,
   addExerciseToProgram,
-  getAllKnownExerciseNames,
+  getAllKnownActivityNames,
   getGyms,
+  deleteCustomItem,
 } from '../supabase'
 import WorkoutBuilderModal from './WorkoutBuilderModal'
 import {
@@ -328,7 +329,7 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
     setPickerKind('activity')
     if (knownNames.length === 0 && userId) {
       try {
-        const names = await getAllKnownExerciseNames(userId)
+        const names = await getAllKnownActivityNames(userId)
         setKnownNames(names)
       } catch { /* non-fatal */ }
     }
@@ -504,6 +505,10 @@ export default function DayScreen({ day, program, userId, profile, onBack, onSel
           createLabel="+ Create your own activity"
           createPlaceholder="Activity name"
           yourGroupLabel="Your activities"
+          onDeleteCustom={async (name) => {
+            await deleteCustomItem(name, userId)
+            setKnownNames(prev => prev.filter(n => n.toLowerCase() !== name.toLowerCase()))
+          }}
         />
       )}
 

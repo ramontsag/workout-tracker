@@ -35,6 +35,8 @@ export default function CatalogPickerModal({
   const [openGroup, setOpenGroup] = useState(null)
   const [creatingName, setCreatingName] = useState(null)  // null | string
   const [confirmDelete, setConfirmDelete] = useState(null) // null | name
+  const [deleteError, setDeleteError] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   const existingLower = useMemo(
     () => new Set(existingNames.map(n => (n || '').toLowerCase())),
@@ -125,6 +127,29 @@ export default function CatalogPickerModal({
           autoFocus
         />
 
+        {/* Hoisted "Create your own" — sits right under search so it's
+            obviously available and never gets buried below long catalogs. */}
+        <div className="picker-create-top">
+          {creatingName === null ? (
+            <button className="picker-create-btn-alt" onClick={() => setCreatingName(query)}>
+              {createLabel}
+            </button>
+          ) : (
+            <div className="picker-create-row">
+              <input
+                className="picker-create-input"
+                placeholder={createPlaceholder}
+                value={creatingName}
+                onChange={e => setCreatingName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreate() } }}
+                autoFocus
+              />
+              <button className="picker-create-confirm" onClick={handleCreate}>Add</button>
+              <button className="picker-create-cancel" onClick={() => setCreatingName(null)} aria-label="Cancel">×</button>
+            </div>
+          )}
+        </div>
+
         <div className="picker-list">
           {filtered.length === 0 && (
             <div className="picker-empty">No matches. Try a different word, or create your own below.</div>
@@ -183,50 +208,36 @@ export default function CatalogPickerModal({
           })}
         </div>
 
-        <div className="picker-create">
-          {creatingName === null ? (
-            <button className="picker-create-btn" onClick={() => setCreatingName(query)}>
-              {createLabel}
-            </button>
-          ) : (
-            <div className="picker-create-row">
-              <input
-                className="picker-create-input"
-                placeholder={createPlaceholder}
-                value={creatingName}
-                onChange={e => setCreatingName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreate() } }}
-                autoFocus
-              />
-              <button className="picker-create-confirm" onClick={handleCreate}>Add</button>
-              <button className="picker-create-cancel" onClick={() => setCreatingName(null)} aria-label="Cancel">×</button>
-            </div>
-          )}
-          {creatingName !== null && (
-            <p className="picker-create-help">
-              Pick a name you'll use consistently — once you create it, it'll appear here next time so your history stays in one place.
-            </p>
-          )}
-        </div>
       </div>
 
       {confirmDelete && (
-        <div className="confirm-overlay" onClick={() => setConfirmDelete(null)}>
+        <div className="confirm-overlay" onClick={() => !deleting && setConfirmDelete(null)}>
           <div className="confirm-card" onClick={e => e.stopPropagation()}>
             <div className="confirm-title">Delete "{confirmDelete}"?</div>
             <p className="confirm-body">
               This will remove it from your program AND every workout entry you've ever logged for it. This can't be undone.
             </p>
+            {deleteError && <div className="err-msg" style={{ marginBottom: 8 }}>{deleteError}</div>}
             <div className="confirm-actions">
               <button
                 className="confirm-danger"
+                disabled={deleting}
                 onClick={async () => {
-                  try { await onDeleteCustom(confirmDelete) } catch {}
-                  setConfirmDelete(null)
+                  setDeleting(true)
+                  setDeleteError('')
+                  try {
+                    await onDeleteCustom(confirmDelete)
+                    setConfirmDelete(null)
+                  } catch (e) {
+                    setDeleteError(e?.message || 'Delete failed — try again.')
+                  } finally {
+                    setDeleting(false)
+                  }
                 }}
-              >Delete forever</button>
+              >{deleting ? 'Deleting…' : 'Delete forever'}</button>
               <button
                 className="confirm-cancel"
+                disabled={deleting}
                 onClick={() => setConfirmDelete(null)}
               >Cancel</button>
             </div>

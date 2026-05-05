@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { saveProgram, getAllKnownExerciseNames, deleteCustomItem, saveTemplate, deleteWorkoutBlock, updateWorkoutBlock } from '../supabase'
+import { saveProgram, getAllKnownExerciseNames, getAllKnownActivityNames, deleteCustomItem, saveTemplate, deleteWorkoutBlock, updateWorkoutBlock } from '../supabase'
 import { getState as getRestTimerState, stop as stopRestTimer } from '../restTimerStore'
 import {
   FIELD_CATALOG, DEFAULT_ACTIVITY_FIELDS, defaultFieldsFor,
@@ -77,7 +77,8 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   const [pickerKind, setPickerKind] = useState(null)  // null | 'exercise' | 'activity'
   // Which block the rest picker is editing. null = closed.
   const [restPickerBlockId, setRestPickerBlockId] = useState(null)
-  const [knownNames, setKnownNames] = useState([])
+  const [knownExerciseNames, setKnownExerciseNames] = useState([])
+  const [knownActivityNames, setKnownActivityNames] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
   const [infoOpen, setInfoOpen] = useState(false)
@@ -98,9 +99,8 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
 
   useEffect(() => {
     if (!userId || !open) return
-    getAllKnownExerciseNames(userId)
-      .then(setKnownNames)
-      .catch(() => {})
+    getAllKnownExerciseNames(userId).then(setKnownExerciseNames).catch(() => {})
+    getAllKnownActivityNames(userId).then(setKnownActivityNames).catch(() => {})
   }, [userId, open])
 
   const itemCount = draft.exercises.length
@@ -332,6 +332,12 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
             aria-label="How this works"
             title="How this works"
           >ⓘ</button>
+          <button
+            className="header-save-btn"
+            onClick={handleSave}
+            disabled={saving || !isDirty}
+            title={isDirty ? 'Save changes' : 'No unsaved changes'}
+          >{saving ? 'Saving…' : 'Save'}</button>
           <button className="picker-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
@@ -562,9 +568,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                 <div className="day-section-label day-section-label--activity" style={{ marginTop: 22 }}>
                   Activities <span className="field-label-hint">{actIndexed.length} {actIndexed.length === 1 ? 'activity' : 'activities'}</span>
                 </div>
-                {actIndexed.length === 0 ? (
-                  <div className="edit-day-empty">No activities yet.</div>
-                ) : (
+                {actIndexed.length > 0 && (
                   <div className="edit-day-items">
                     {actIndexed.map((entry, n) => renderRow(entry, n, actIndexed.length))}
                   </div>
@@ -594,17 +598,18 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
           onClose={() => setPickerKind(null)}
           onPick={pickerOnPick}
           catalog={pickerCatalog}
-          userKnownNames={knownNames}
-          existingNames={draft.exercises.map(e => e.name)}
+          userKnownNames={pickerKind === 'activity' ? knownActivityNames : knownExerciseNames}
+          existingNames={draft.exercises
+            .filter(e => (e.item_type === 'activity') === (pickerKind === 'activity'))
+            .map(e => e.name)}
           title={pickerTitle}
           createLabel={pickerCreate}
           createPlaceholder={pickerKind === 'activity' ? 'Activity name' : 'Exercise name'}
           yourGroupLabel={pickerYour}
           onDeleteCustom={async (name) => {
             await deleteCustomItem(name, userId)
-            // Drop the deleted name from the local list so the UI updates instantly.
-            setKnownNames(prev => prev.filter(n => n.toLowerCase() !== name.toLowerCase()))
-            // Also remove it from the current draft if present.
+            const setter = pickerKind === 'activity' ? setKnownActivityNames : setKnownExerciseNames
+            setter(prev => prev.filter(n => n.toLowerCase() !== name.toLowerCase()))
             setDraft(prev => ({ ...prev, exercises: prev.exercises.filter(e => e.name !== name) }))
           }}
         />

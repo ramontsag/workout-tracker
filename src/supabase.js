@@ -228,15 +228,15 @@ export async function seedProgramIfMissing(uid) {
   if (insErr) throw new Error(`Seed program failed: ${insErr.message}`)
 }
 
-// Delete a user's custom exercise (or activity) by name. Removes the program
-// rows AND every workout_sets row referencing that name, so the name fully
-// disappears from autocomplete and history. Catalog names are not affected
-// — they live in code, not the DB.
+// Delete a user's custom exercise (or activity) by name. Removes program rows
+// AND every workout_sets row referencing that name. Catalog names live in
+// code, not the DB, so this only affects user-created/used items. Tolerant
+// of "nothing to delete" — the picker fires this even when rows already gone
+// (e.g. only logged in workout_sets, never on a day).
 export async function deleteCustomItem(name, uid) {
   if (!uid)  throw new Error('Not authenticated')
   if (!name) throw new Error('No name')
   const trimmed = name.trim()
-  // workout_sets first so history is gone before the program reference drops.
   const r1 = await withTimeout(
     supabase.from('workout_sets').delete().eq('user_id', uid).eq('exercise_name', trimmed),
     5000, 'Delete history'
@@ -2058,34 +2058,35 @@ export async function getExerciseNames(uid) {
   return (data || []).filter(r => seen.has(r.name) ? false : seen.add(r.name)).map(r => r.name)
 }
 
-// Returns the union of exercise names the user has ever defined in their
-// program OR logged in a past workout. Used by the autocomplete in
-// ProgramSetup so suggestions include lifts they've dropped from the
-// current program but still remember by name. Deduped case-insensitively,
-// preserving the first occurrence's casing.
-export async function getAllKnownExerciseNames(uid) {
+// Returns names the user has used as EXERCISES — either currently on a day
+// or logged in a past workout session. The workout_sets union is filtered by
+// joining workouts on kind='workout' so activity-session set rows don't leak
+// into the exercise picker (and vice-versa for the activity variant below).
+async function getKnownNamesByKind(uid, kind) {
   if (!uid) throw new Error('Not authenticated')
+  const itemType = kind === 'activity' ? 'activity' : 'exercise'
   const [fromProgram, fromLogs] = await Promise.all([
     withTimeout(
       supabase
         .from('exercises')
         .select('name')
         .eq('user_id', uid)
-        .eq('item_type', 'exercise'),
+        .eq('item_type', itemType),
       5000, 'Load program names'
     ),
     withTimeout(
       supabase
         .from('workout_sets')
-        .select('exercise_name')
-        .eq('user_id', uid),
+        .select('exercise_name, workouts!inner(kind)')
+        .eq('user_id', uid)
+        .eq('workouts.kind', kind),
       5000, 'Load history names'
     ),
   ])
   if (fromProgram.error) throw new Error(`Load names failed: ${fromProgram.error.message}`)
   if (fromLogs.error)    throw new Error(`Load names failed: ${fromLogs.error.message}`)
 
-  const seen = new Map() // lowercase → original
+  const seen = new Map()
   for (const row of fromProgram.data || []) {
     const name = (row.name || '').trim()
     if (name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name)
@@ -2095,6 +2096,14 @@ export async function getAllKnownExerciseNames(uid) {
     if (name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name)
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b))
+}
+
+export function getAllKnownExerciseNames(uid) {
+  return getKnownNamesByKind(uid, 'workout')
+}
+
+export function getAllKnownActivityNames(uid) {
+  return getKnownNamesByKind(uid, 'activity')
 }
 
 // Returns volume + max e1RM per session for a given exercise, newest first.
