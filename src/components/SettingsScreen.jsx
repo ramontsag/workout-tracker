@@ -1,10 +1,20 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { saveSettings } from '../supabase'
 
 export default function SettingsScreen({ user, profile, onBack, onProfileUpdated }) {
   const [weightUnit,    setWeightUnit]    = useState(profile?.weight_unit    || 'kg')
   const [intensityMode, setIntensityMode] = useState(profile?.intensity_mode || 'off')
   const [error, setError] = useState('')
+
+  // Sync state if `profile` arrives after mount (e.g. user opened Settings
+  // before App.jsx finished loadProfile). Without this, the toggles would
+  // silently default to kg/off even when the saved profile says otherwise.
+  useEffect(() => {
+    if (!profile) return
+    if (profile.weight_unit    && profile.weight_unit    !== weightUnit)    setWeightUnit(profile.weight_unit)
+    if (profile.intensity_mode && profile.intensity_mode !== intensityMode) setIntensityMode(profile.intensity_mode)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.weight_unit, profile?.intensity_mode])
 
   const updateField = async (field, value, setter, prev) => {
     setter(value)

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { signIn, signUp, resetPassword } from '../supabase'
 
 export default function AuthScreen() {
@@ -9,19 +9,43 @@ export default function AuthScreen() {
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState('')
   const [message,  setMessage]  = useState('')
+  // Watchdog timer ref — fires if signIn resolves but onAuthStateChange
+  // never lands (e.g. Safari private mode where session storage is
+  // blocked). Without this the user is stuck on a disabled "Logging in…"
+  // button forever with no error.
+  const watchdogRef = useRef(null)
 
-  const switchMode = (next) => { setError(''); setMessage(''); setMode(next) }
+  useEffect(() => () => {
+    if (watchdogRef.current) clearTimeout(watchdogRef.current)
+  }, [])
+
+  const switchMode = (next) => {
+    setError(''); setMessage(''); setMode(next)
+    // Clear password when switching modes so the typed password doesn't
+    // sit in memory across mode flips (also clears it after signup so the
+    // login form starts fresh).
+    setPassword('')
+  }
 
   // ── Login ──────────────────────────────────────────────────
   const handleLogin = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
+    // 8s watchdog — if SIGNED_IN never arrives, surface a clear error so
+    // the user isn't trapped on a disabled button.
+    if (watchdogRef.current) clearTimeout(watchdogRef.current)
+    watchdogRef.current = setTimeout(() => {
+      setError('Login is taking longer than expected. Check your network or try a non-private browser window.')
+      setLoading(false)
+    }, 8000)
     try {
       await signIn(email, password)
       // Success: App.jsx onAuthStateChange → SIGNED_IN → navigates away.
       // Keep loading=true so the button stays disabled until unmount.
+      // Watchdog stays armed; unmount cleanup will clear it on success.
     } catch (err) {
+      if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null }
       setError(err.message || 'Login failed — please try again')
       setLoading(false) // only reset on failure
     }
