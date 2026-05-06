@@ -16,7 +16,10 @@
   --danger:       #ef4444;
   --text:         #e0e0e0;
   --text-dim:     #aaaaaa;
-  --text-muted:   #444444;
+  /* Bumped from #444 → #7a7a7a so secondary labels (counts, captions,
+     legend text, "/ 5", weekday headers, etc.) stay readable in dim
+     gym lighting without competing with primary text. */
+  --text-muted:   #7a7a7a;
   --text-dead:    #333333;
   --font-display: 'Barlow Condensed', Impact, sans-serif;
   --font-body:    'DM Sans', system-ui, sans-serif;
@@ -391,10 +394,11 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* Content area inside every card — base size for FUTURE/no-modifier days.
-   Past + today override below in the size-tier block. */
+   Past + today override below in the size-tier block. Bumped from 16px →
+   18px vertical for a tad more breathing room without growing the text. */
 .day-card__content {
   flex: 1;
-  padding: 16px 16px 16px 18px;
+  padding: 18px 16px 18px 18px;
   min-width: 0;
 }
 /* Extra left padding for today card (no ::before bar) */
@@ -410,10 +414,11 @@ a { color: inherit; text-decoration: none; }
   text-transform: uppercase;
   line-height: 1.1;
   margin-bottom: 4px;
+  /* All day names render in the same primary text color regardless of
+     kind — was inconsistent before (rest grey, empty darker grey, gym
+     white) which made activity-only days look "off". */
+  color: var(--text);
 }
-/* Rest/activity/empty day name colors */
-.day-card--rest  .day-card__name  { color: #aaaaaa; }
-.day-card--empty .day-card__name  { color: #666666; }
 
 /* Title row — focus text + inline off-schedule arrow + pill(s).
    Wraps onto a second visual line when content is long; on narrow viewports
@@ -436,22 +441,23 @@ a { color: inherit; text-decoration: none; }
 .day-card--hybrid .day-card__focus { color: var(--hybrid); }
 .day-card--empty  .day-card__focus { color: #555555; }
 
-/* Past days fade slightly — eye lands on today first, but past completion
-   ✓s and pills are still readable. Only opacity is touched so the kind
-   colors stay correct underneath. */
+/* Past days fade — eye lands on today first, but completion ✓s and
+   pills are still readable. Dropped to 0.5 so it's clearly "behind us"
+   without becoming illegible. */
 .day-card--past {
-  opacity: 0.62;
+  opacity: 0.5;
 }
 .day-card--past.day-card--today {
   opacity: 1;
 }
 
 /* ── Day card size tiers ───────────────────────────────
-   Three sizes — past (smallest, faded) → future (base) → today (biggest).
-   All bumped uniformly so the grid feels airier without losing the
-   today-is-the-focus hierarchy. */
+   Past (smallest + faded) → future (base) → today (tallest block).
+   The today tier keeps base text/edit-pill sizes — prominence comes from
+   the larger vertical padding + indicator circle, NOT inflated text.
+   That keeps the ratios clean and the day name from looking shouty. */
 .day-card--past .day-card__content {
-  padding: 12px 14px 12px 16px;
+  padding: 14px 15px 14px 17px;
 }
 .day-card--past .day-card__name  { font-size: 19px; margin-bottom: 3px; }
 .day-card--past .day-card__focus { font-size: 13px; }
@@ -461,30 +467,32 @@ a { color: inherit; text-decoration: none; }
 }
 
 .day-card--today .day-card__content {
-  padding-top: 22px;
-  padding-bottom: 22px;
+  padding-top: 24px;
+  padding-bottom: 24px;
 }
-.day-card--today .day-card__name  { font-size: 28px; margin-bottom: 6px; }
-.day-card--today .day-card__focus { font-size: 17px; }
+/* Today text stays at base font-size — the prominence is the padding +
+   the larger indicator circle. Was 28/17 which dwarfed the surrounding
+   day cards and read shouty. */
 .day-card--today .day-card__indicator-circle {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
 }
-.day-card--today .day-card__indicator-check { font-size: 19px; }
-.day-card--today .day-card__edit {
-  padding: 7px 13px;
-  font-size: 12px;
-}
-/* Today's left stripe is taller because content is taller — auto-stretches
-   via align-self, but bump abbr font + dot for proportion. */
-.day-card--today .day-card__abbr     { font-size: 14px; }
-.day-card--today .day-card__pulse-dot { width: 8px; height: 8px; }
+.day-card--today .day-card__indicator-check { font-size: 17px; }
+/* Edit button keeps base sizing too. The room comes from the larger
+   stripe + content padding, not by bulking the edit pill. */
+.day-card--today .day-card__abbr     { font-size: 13px; }
+.day-card--today .day-card__pulse-dot { width: 7px; height: 7px; }
 
 /* Right-side indicator circle */
 .day-card__indicator-wrap {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* Left padding gives the indicator visible separation from the Edit
+     button at the top of the content column — without it, the two
+     elements visually crowd each other (especially on today, which has
+     the larger circle). */
+  padding-left: 8px;
   padding-right: 14px;
   flex-shrink: 0;
 }
