@@ -369,140 +369,60 @@ export async function getProgram(uid) {
   return [...trainingDays, ...activityDays]
 }
 
-// uid is passed in from App state — this function never calls any
-// auth method so it never acquires the Navigator Lock.
+// Atomic program save via the save_program_atomic RPC. The whole flow
+// (delete removed days, upsert existing, insert new, swap each day's
+// exercises) runs in one Postgres transaction — partial failures roll
+// back cleanly. Requires migrate_save_program_atomic.sql to have been
+// run on the DB.
 export async function saveProgram(days, uid) {
   if (!uid) throw new Error('Not authenticated — please log in again')
 
-  const db = (q, label) => withTimeout(q, 5000, label)
-
-  // 1 — fetch existing days to decide update vs insert
-  const { data: existing, error: fetchErr } = await db(
-    supabase.from('training_days').select('id, name').eq('user_id', uid),
-    'Fetch existing days'
-  )
-  if (fetchErr) throw new Error(`Fetch failed: ${fetchErr.message}`)
-
-  const existingByName = Object.fromEntries(
-    (existing || []).map(d => [d.name.toLowerCase(), d.id])
-  )
-  const incomingNames = new Set(days.map(d => d.name.toLowerCase()))
-
-  const toUpdate = []
-  const toInsert = []
-  days.forEach((day, i) => {
-    const id = existingByName[day.name.toLowerCase()]
-    if (id) toUpdate.push({ ...day, id, sort_order: i })
-    else     toInsert.push({ ...day, sort_order: i })
-  })
-
-  const toDelete = (existing || [])
-    .filter(d => !incomingNames.has(d.name.toLowerCase()))
-    .map(d => d.id)
-
-  const dayIdMap = {}
-
-  // 2 — delete removed days (CASCADE deletes their exercises). Defensive
-  // user_id filter on top of RLS — an audit-friendly redundancy and a safety
-  // net if RLS policies are ever loosened.
-  if (toDelete.length) {
-    const { error } = await db(
-      supabase.from('training_days').delete().eq('user_id', uid).in('id', toDelete),
-      'Delete removed days'
-    )
-    if (error) throw new Error(`Delete failed: ${error.message}`)
-  }
-
-  // 3 — upsert existing days (preserves IDs → workout history stays linked)
-  if (toUpdate.length) {
-    const { error } = await db(
-      supabase.from('training_days').upsert(
-        toUpdate.map(d => ({
-          id: d.id, user_id: uid,
-          name: d.name, focus: d.focus, color: d.color, sort_order: d.sort_order,
-          rest_seconds: d.rest_seconds ?? 90,
-        })),
-        { onConflict: 'id' }
-      ),
-      'Update existing days'
-    )
-    if (error) throw new Error(`Update failed: ${error.message}`)
-    toUpdate.forEach(d => { dayIdMap[d.name.toLowerCase()] = d.id })
-  }
-
-  // 4 — insert new days, capture their generated IDs
-  if (toInsert.length) {
-    const { data: newDays, error } = await db(
-      supabase
-        .from('training_days')
-        .insert(toInsert.map(d => ({
-          user_id: uid,
-          name: d.name, focus: d.focus, color: d.color, sort_order: d.sort_order,
-          rest_seconds: d.rest_seconds ?? 90,
-        })))
-        .select('id, name'),
-      'Insert new days'
-    )
-    if (error) throw new Error(`Insert days failed: ${error.message}`)
-    ;(newDays || []).forEach(d => { dayIdMap[d.name.toLowerCase()] = d.id })
-  }
-
-  // 5 — atomic-ish replacement of exercise rows on updated days.
-  // Build the full insert payload FIRST. If the payload is malformed we bail
-  // BEFORE deleting anything, so a bad save can never wipe rows without
-  // replacement. This isn't a true DB transaction (would require an RPC), but
-  // it eliminates the worst case where step 5a succeeds and 5b fails on a
-  // validation-shaped error.
-  const allExercises = []
-  for (const day of days) {
-    const dayId = dayIdMap[day.name.toLowerCase()]
-    if (!dayId) continue
-    day.exercises.forEach((ex, j) => {
+  // Validate upfront — a malformed payload would make the RPC raise, but
+  // checking here gives a clearer message and avoids the round trip.
+  for (const day of days || []) {
+    for (const ex of day.exercises || []) {
       if (!ex.name || typeof ex.name !== 'string') {
-        throw new Error('Save aborted: every exercise needs a name (no rows changed).')
+        throw new Error('Save aborted: every exercise needs a name.')
       }
-      allExercises.push({
-        user_id:          uid,
-        training_day_id:  dayId,
-        name:             ex.name,
-        target:           ex.target || '',
-        item_type:        ex.item_type || 'exercise',
-        track_mode:       ex.item_type === 'exercise' ? (ex.track_mode || 'sets') : 'sets',
-        set_count:        ex.item_type === 'exercise'
-          ? (ex.set_count ?? (ex.track_mode === 'check' ? 1 : 2))
-          : null,
-        sort_order:       j,
-        activity_fields:  ex.item_type === 'activity' && Array.isArray(ex.activity_fields)
-          ? ex.activity_fields
-          : null,
-        superset_group:   ex.item_type === 'exercise' ? (ex.superset_group || null) : null,
-        workout_block_id: ex.item_type === 'exercise' ? (ex.workout_block_id || null) : null,
-        has_drop_sets:    ex.item_type === 'exercise' ? (ex.drop_set_mode ? ex.drop_set_mode !== 'off' : !!ex.has_drop_sets) : false,
-        drop_set_mode:    ex.item_type === 'exercise' ? (ex.drop_set_mode || (ex.has_drop_sets ? 'all' : 'off')) : 'off',
-      })
-    })
+    }
   }
 
-  // 5a — delete old exercises only for days we're about to repopulate. uid
-  // filter on top of RLS for the same defense-in-depth reason as step 2.
-  const updatedIds = toUpdate.map(d => d.id)
-  if (updatedIds.length) {
-    const { error } = await db(
-      supabase.from('exercises').delete().eq('user_id', uid).in('training_day_id', updatedIds),
-      'Delete old exercises'
-    )
-    if (error) throw new Error(`Delete exercises failed: ${error.message}`)
-  }
+  // Shape the payload — strip client-only fields, normalize unset values
+  // so the RPC never needs to guess. sort_order on days falls back to
+  // array position when not provided.
+  const payload = (days || []).map((d, i) => ({
+    name:         d.name,
+    focus:        d.focus || '',
+    color:        d.color || null,
+    sort_order:   d.sort_order ?? i,
+    rest_seconds: d.rest_seconds ?? 90,
+    exercises: (d.exercises || []).map(ex => ({
+      name:             ex.name,
+      target:           ex.target || '',
+      item_type:        ex.item_type || 'exercise',
+      track_mode:       ex.item_type === 'exercise' ? (ex.track_mode || 'sets') : 'sets',
+      set_count:        ex.item_type === 'exercise'
+        ? (ex.set_count ?? (ex.track_mode === 'check' ? 1 : 2))
+        : null,
+      activity_fields:  ex.item_type === 'activity' && Array.isArray(ex.activity_fields)
+        ? ex.activity_fields
+        : null,
+      superset_group:   ex.item_type === 'exercise' ? (ex.superset_group || null) : null,
+      workout_block_id: ex.item_type === 'exercise' ? (ex.workout_block_id || null) : null,
+      has_drop_sets:    ex.item_type === 'exercise'
+        ? (ex.drop_set_mode ? ex.drop_set_mode !== 'off' : !!ex.has_drop_sets)
+        : false,
+      drop_set_mode:    ex.item_type === 'exercise'
+        ? (ex.drop_set_mode || (ex.has_drop_sets ? 'all' : 'off'))
+        : 'off',
+    })),
+  }))
 
-  // 5b — single round trip. If this fails after 5a wiped, the days now have
-  // no exercises — surfaced explicitly so the caller can tell the user.
-  if (allExercises.length) {
-    const { error } = await db(
-      supabase.from('exercises').insert(allExercises),
-      'Insert exercises'
-    )
-    if (error) throw new Error(`Insert exercises failed (your previous program rows were cleared but the replacement didn't land — please retry the save): ${error.message}`)
-  }
+  const { error } = await withTimeout(
+    supabase.rpc('save_program_atomic', { p_user_id: uid, p_days: payload }),
+    8000, 'Save program'
+  )
+  if (error) throw new Error(`Save failed: ${error.message}`)
 }
 
 // ── Workouts ──────────────────────────────────────────────────
@@ -962,16 +882,16 @@ export async function discardDraft(workoutId, uid) {
 
 // Returns every completed workouts row in [startISO, endISO). Used by the
 // calendar view to show what was done on each day in a month. Returned
-// rows include kind, name, training_day_id, block id, and completed_at so
-// the calendar can render kind-colored dots and a tap-through detail sheet
-// without a second round trip per day.
+// rows include kind, name, training_day_id, block id, started_at +
+// completed_at (so durations can be computed) without a second round
+// trip per day.
 export async function getCompletedSessionsInRange(startISO, endISO, uid) {
   if (!uid) throw new Error('Not authenticated')
   if (!startISO || !endISO) return []
   const { data, error } = await withTimeout(
     supabase
       .from('workouts')
-      .select('id, kind, day_name, activity_name, workout_block_id, training_day_id, completed_at')
+      .select('id, kind, day_name, activity_name, workout_block_id, training_day_id, started_at, completed_at')
       .eq('user_id', uid)
       .eq('status', 'completed')
       .gte('completed_at', startISO)
@@ -981,6 +901,114 @@ export async function getCompletedSessionsInRange(startISO, endISO, uid) {
   )
   if (error) throw new Error(`Load month sessions failed: ${error.message}`)
   return data || []
+}
+
+// Heavier month-level rollup for the Calendar's expanded summary.
+// Returns:
+//   - workoutMinutes: sum of (completed_at - started_at) in workout-kind rows
+//   - activityMinutes: sum of duration_min on activity workout_sets
+//   - prCount: number of working sets in the month that beat the running
+//     all-time best for that exercise (Epley e1RM)
+//   - prByExercise: { name: count } breakdown
+//
+// PR detection scans every working set the user has logged UP TO `endISO`
+// (not just the month) so we know each set's running-best context. Could
+// get heavy for power users with years of data — fine for the trial.
+export async function getMonthSummary(startISO, endISO, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  if (!startISO || !endISO) return { workoutMinutes: 0, activityMinutes: 0, prCount: 0, prByExercise: {} }
+
+  const [wRes, aSetsRes, allSetsRes] = await Promise.all([
+    // Workout sessions in range — for total duration via started_at/completed_at.
+    withTimeout(
+      supabase.from('workouts')
+        .select('id, started_at, completed_at')
+        .eq('user_id', uid)
+        .eq('kind', 'workout')
+        .eq('status', 'completed')
+        .gte('completed_at', startISO)
+        .lt('completed_at', endISO),
+      5000, 'Load month workouts'
+    ),
+    // Activity set rows in the month — for sum of duration_min.
+    withTimeout(
+      supabase.from('workout_sets')
+        .select('duration_min, workouts!inner(kind, completed_at, status)')
+        .eq('user_id', uid)
+        .eq('workouts.kind', 'activity')
+        .eq('workouts.status', 'completed')
+        .gte('workouts.completed_at', startISO)
+        .lt('workouts.completed_at', endISO),
+      5000, 'Load month activity duration'
+    ).catch(e => { console.warn('activity duration:', e?.message); return { data: null, error: null } }),
+    // ALL working sets up to endISO — needed to compute running PR baseline
+    // chronologically. Filters to weight > 0 AND reps > 0 to skip checks +
+    // empties (Postgres treats those as `false` for the comparison).
+    withTimeout(
+      supabase.from('workout_sets')
+        .select('exercise_name, weight_kg, reps, is_warmup, is_drop_set, workouts!inner(kind, status, completed_at)')
+        .eq('user_id', uid)
+        .eq('workouts.kind', 'workout')
+        .eq('workouts.status', 'completed')
+        .lt('workouts.completed_at', endISO)
+        .gt('weight_kg', 0)
+        .gt('reps', 0),
+      8000, 'Load PR history'
+    ),
+  ])
+
+  // Workout duration — minutes between started_at and completed_at, summed.
+  let workoutMinutes = 0
+  for (const w of (wRes.data || [])) {
+    if (!w.started_at || !w.completed_at) continue
+    const ms = new Date(w.completed_at).getTime() - new Date(w.started_at).getTime()
+    if (ms > 0) workoutMinutes += ms / 60000
+  }
+
+  // Activity minutes — direct sum.
+  let activityMinutes = 0
+  for (const r of (aSetsRes.data || [])) {
+    const m = Number(r.duration_min)
+    if (!isNaN(m)) activityMinutes += m
+  }
+
+  // PRs in range — chronological scan, count sets in [startISO, endISO)
+  // that beat their running best at that point.
+  const sets = (allSetsRes.data || [])
+    .filter(s => !s.is_warmup && !s.is_drop_set && s.workouts?.completed_at)
+    .map(s => ({
+      name: s.exercise_name,
+      e1rm: Number(s.weight_kg) * (1 + Number(s.reps) / 30),
+      at:   s.workouts.completed_at,
+    }))
+    .sort((a, b) => new Date(a.at) - new Date(b.at))
+
+  const startTs = new Date(startISO).getTime()
+  const endTs   = new Date(endISO).getTime()
+  const bestSoFar = {}
+  const prByExercise = {}
+  let prCount = 0
+  for (const s of sets) {
+    const prev = bestSoFar[s.name] || 0
+    if (s.e1rm > prev) {
+      bestSoFar[s.name] = s.e1rm
+      const ts = new Date(s.at).getTime()
+      // Skip the very-first set per exercise — it's a baseline, not a "PR
+      // hit". Tracking via prev > 0 means new exercises don't inflate the
+      // count just by existing.
+      if (prev > 0 && ts >= startTs && ts < endTs) {
+        prCount++
+        prByExercise[s.name] = (prByExercise[s.name] || 0) + 1
+      }
+    }
+  }
+
+  return {
+    workoutMinutes:  Math.round(workoutMinutes),
+    activityMinutes: Math.round(activityMinutes),
+    prCount,
+    prByExercise,
+  }
 }
 
 // Returns the completed workouts rows (kind + activity_name + completed_at)

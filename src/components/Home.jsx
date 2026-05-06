@@ -450,7 +450,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
                     </span>
                     {offScheduleActual.length > 0 && (
                       <>
-                        <span className="day-card__actual-arrow" aria-label="Actually did">↳</span>
+                        <span className="day-card__actual-arrow" aria-label="Actually did">→</span>
                         {offScheduleActual.map((a, k) => (
                           <span
                             key={k}

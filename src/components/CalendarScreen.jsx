@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { getCompletedSessionsInRange } from '../supabase'
+import { getCompletedSessionsInRange, getMonthSummary } from '../supabase'
 
 // Calendar trial — month grid showing what was actually done each day.
 // Each cell shows the date + up to 2 small kind-colored dots (orange =
@@ -31,9 +31,94 @@ function labelForSession(s) {
   return s.day_name || (s.kind === 'workout' ? 'Workout' : 'Session')
 }
 
+// Format minutes as "Hh Mm" / "Mm" / "—" depending on size.
+function fmtMinutes(min) {
+  if (!min || min < 1) return '—'
+  if (min < 60) return `${Math.round(min)}m`
+  const h = Math.floor(min / 60)
+  const m = Math.round(min % 60)
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
+// Expanded workout panel — stats grid (sessions, hours, PRs) + per-name
+// breakdown with PR badges. Renders inside the workout summary card when
+// the user taps to expand.
+function ExpandedWorkoutPanel({ breakdown, monthSummary }) {
+  const totalSessions = breakdown.reduce((sum, [, n]) => sum + n, 0)
+  const hours    = monthSummary?.workoutMinutes ?? null
+  const prCount  = monthSummary?.prCount ?? null
+  const prByEx   = monthSummary?.prByExercise || {}
+  return (
+    <div className="calendar-expanded">
+      <div className="calendar-expanded__stats">
+        <div className="calendar-expanded__stat">
+          <span className="calendar-expanded__stat-val">{totalSessions}</span>
+          <span className="calendar-expanded__stat-label">sessions</span>
+        </div>
+        <div className="calendar-expanded__stat">
+          <span className="calendar-expanded__stat-val">{hours != null ? fmtMinutes(hours) : '—'}</span>
+          <span className="calendar-expanded__stat-label">time</span>
+        </div>
+        <div className="calendar-expanded__stat">
+          <span className="calendar-expanded__stat-val">{prCount ?? '—'}</span>
+          <span className="calendar-expanded__stat-label">PRs</span>
+        </div>
+      </div>
+      <div className="calendar-expanded__section-label">Workouts</div>
+      <ul className="calendar-summary-card__list">
+        {breakdown.map(([name, n]) => {
+          const pr = prByEx[name] || 0  // PRs detected against this exact name
+          return (
+            <li key={name} className="calendar-summary-row">
+              <span className="calendar-summary-row__name">{name}</span>
+              {pr > 0 && (
+                <span className="calendar-pr-badge" title={`${pr} PR${pr === 1 ? '' : 's'} this month`}>
+                  ★ {pr}
+                </span>
+              )}
+              <span className="calendar-summary-row__count">× {n}</span>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+// Expanded activity panel — sessions, hours, and per-name breakdown.
+// No PRs since activities aren't load-tracked the same way.
+function ExpandedActivityPanel({ breakdown, monthSummary }) {
+  const totalSessions = breakdown.reduce((sum, [, n]) => sum + n, 0)
+  const hours = monthSummary?.activityMinutes ?? null
+  return (
+    <div className="calendar-expanded">
+      <div className="calendar-expanded__stats">
+        <div className="calendar-expanded__stat">
+          <span className="calendar-expanded__stat-val">{totalSessions}</span>
+          <span className="calendar-expanded__stat-label">sessions</span>
+        </div>
+        <div className="calendar-expanded__stat">
+          <span className="calendar-expanded__stat-val">{hours != null ? fmtMinutes(hours) : '—'}</span>
+          <span className="calendar-expanded__stat-label">time</span>
+        </div>
+      </div>
+      <div className="calendar-expanded__section-label">Activities</div>
+      <ul className="calendar-summary-card__list">
+        {breakdown.map(([name, n]) => (
+          <li key={name} className="calendar-summary-row">
+            <span className="calendar-summary-row__name">{name}</span>
+            <span className="calendar-summary-row__count">× {n}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export default function CalendarScreen({ userId, onBack }) {
   const [cursor, setCursor]       = useState(() => startOfMonth(new Date()))
   const [sessions, setSessions]   = useState([])
+  const [monthSummary, setMonthSummary] = useState(null)  // { workoutMinutes, activityMinutes, prCount, prByExercise }
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState('')
   const [selectedDay, setSelectedDay] = useState(null)  // Date | null
@@ -43,16 +128,25 @@ export default function CalendarScreen({ userId, onBack }) {
 
   const today = new Date()
 
-  // Load sessions for the visible month. Range is [first of month, first of
-  // next month) so we never double-fetch the boundary.
+  // Load sessions + summary for the visible month in parallel. Range is
+  // [first of month, first of next month) so we never double-fetch the
+  // boundary. Summary is best-effort — calendar still renders if the
+  // PR/duration query fails.
   useEffect(() => {
     if (!userId) return
     let cancelled = false
-    setLoading(true); setError('')
+    setLoading(true); setError(''); setMonthSummary(null); setExpandedSummary(null)
     const start = startOfMonth(cursor).toISOString()
     const end   = startOfNextMonth(cursor).toISOString()
-    getCompletedSessionsInRange(start, end, userId)
-      .then(rows => { if (!cancelled) setSessions(rows) })
+    Promise.all([
+      getCompletedSessionsInRange(start, end, userId),
+      getMonthSummary(start, end, userId).catch(() => null),
+    ])
+      .then(([rows, summary]) => {
+        if (cancelled) return
+        setSessions(rows)
+        setMonthSummary(summary)
+      })
       .catch(e => { if (!cancelled) setError(e.message || 'Could not load month') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -210,11 +304,12 @@ export default function CalendarScreen({ userId, onBack }) {
           </span>
         </div>
 
-        {/* Month summary — two stat cards + tap-to-expand breakdown.
-            Workout = orange, activity = cyan. Tapping a card reveals the
-            named breakdown for that kind ("Push A × 3, Pull A × 2"). */}
+        {/* Month summary — two stat cards. Tap to expand into a rich
+            breakdown panel with hours done, PRs hit (workouts only), and
+            a per-name list. Expanded panel takes the full row so it has
+            the breathing room for the stats grid. */}
         {(monthStats.workoutTotal > 0 || monthStats.activityTotal > 0) && (
-          <div className="calendar-summary">
+          <div className={`calendar-summary${expandedSummary ? ' calendar-summary--expanded' : ''}`}>
             <button
               type="button"
               className={`calendar-summary-card calendar-summary-card--workout${expandedSummary === 'workouts' ? ' calendar-summary-card--open' : ''}`}
@@ -233,15 +328,11 @@ export default function CalendarScreen({ userId, onBack }) {
                   </span>
                 )}
               </div>
-              {expandedSummary === 'workouts' && monthStats.workoutBreakdown.length > 0 && (
-                <ul className="calendar-summary-card__list">
-                  {monthStats.workoutBreakdown.map(([name, n]) => (
-                    <li key={name} className="calendar-summary-row">
-                      <span className="calendar-summary-row__name">{name}</span>
-                      <span className="calendar-summary-row__count">× {n}</span>
-                    </li>
-                  ))}
-                </ul>
+              {expandedSummary === 'workouts' && (
+                <ExpandedWorkoutPanel
+                  breakdown={monthStats.workoutBreakdown}
+                  monthSummary={monthSummary}
+                />
               )}
             </button>
             <button
@@ -262,15 +353,11 @@ export default function CalendarScreen({ userId, onBack }) {
                   </span>
                 )}
               </div>
-              {expandedSummary === 'activities' && monthStats.activityBreakdown.length > 0 && (
-                <ul className="calendar-summary-card__list">
-                  {monthStats.activityBreakdown.map(([name, n]) => (
-                    <li key={name} className="calendar-summary-row">
-                      <span className="calendar-summary-row__name">{name}</span>
-                      <span className="calendar-summary-row__count">× {n}</span>
-                    </li>
-                  ))}
-                </ul>
+              {expandedSummary === 'activities' && (
+                <ExpandedActivityPanel
+                  breakdown={monthStats.activityBreakdown}
+                  monthSummary={monthSummary}
+                />
               )}
             </button>
           </div>

@@ -290,7 +290,9 @@ a { color: inherit; text-decoration: none; }
 .day-grid {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* Slightly more breathing room between cards — pairs with the larger
+     base card size below to make the grid read airier, not denser. */
+  gap: 12px;
   padding: 0 16px 40px;
 }
 
@@ -388,25 +390,26 @@ a { color: inherit; text-decoration: none; }
   animation: pulse 1.8s ease-in-out infinite;
 }
 
-/* Content area inside every card */
+/* Content area inside every card — base size for FUTURE/no-modifier days.
+   Past + today override below in the size-tier block. */
 .day-card__content {
   flex: 1;
-  padding: 13px 14px 13px 17px;
+  padding: 16px 16px 16px 18px;
   min-width: 0;
 }
 /* Extra left padding for today card (no ::before bar) */
 .day-card--today .day-card__content {
-  padding-left: 14px;
+  padding-left: 16px;
 }
 
 .day-card__name {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 800;
   font-family: var(--font-display);
   letter-spacing: 0.5px;
   text-transform: uppercase;
   line-height: 1.1;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 /* Rest/activity/empty day name colors */
 .day-card--rest  .day-card__name  { color: #aaaaaa; }
@@ -423,7 +426,7 @@ a { color: inherit; text-decoration: none; }
   min-width: 0;
 }
 .day-card__focus {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.2px;
   min-width: 0;
@@ -444,40 +447,38 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ── Day card size tiers ───────────────────────────────
-   Past = small + faded (already done above).
-   Future = base size (medium).
-   Today = noticeably larger so the eye lands there first. We bump the
-   content padding, the day name + focus font, and the indicator
-   circle. Past days also get a tighter padding to feel smaller. */
+   Three sizes — past (smallest, faded) → future (base) → today (biggest).
+   All bumped uniformly so the grid feels airier without losing the
+   today-is-the-focus hierarchy. */
 .day-card--past .day-card__content {
-  padding: 9px 12px 9px 15px;
+  padding: 12px 14px 12px 16px;
 }
-.day-card--past .day-card__name  { font-size: 17px; }
-.day-card--past .day-card__focus { font-size: 12px; }
+.day-card--past .day-card__name  { font-size: 19px; margin-bottom: 3px; }
+.day-card--past .day-card__focus { font-size: 13px; }
 .day-card--past .day-card__indicator-circle {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
 }
 
 .day-card--today .day-card__content {
-  padding-top: 18px;
-  padding-bottom: 18px;
+  padding-top: 22px;
+  padding-bottom: 22px;
 }
-.day-card--today .day-card__name  { font-size: 24px; margin-bottom: 5px; }
-.day-card--today .day-card__focus { font-size: 15px; }
+.day-card--today .day-card__name  { font-size: 28px; margin-bottom: 6px; }
+.day-card--today .day-card__focus { font-size: 17px; }
 .day-card--today .day-card__indicator-circle {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
 }
-.day-card--today .day-card__indicator-check { font-size: 17px; }
+.day-card--today .day-card__indicator-check { font-size: 19px; }
 .day-card--today .day-card__edit {
-  padding: 6px 12px;
-  font-size: 11px;
+  padding: 7px 13px;
+  font-size: 12px;
 }
 /* Today's left stripe is taller because content is taller — auto-stretches
    via align-self, but bump abbr font + dot for proportion. */
-.day-card--today .day-card__abbr     { font-size: 13px; }
-.day-card--today .day-card__pulse-dot { width: 7px; height: 7px; }
+.day-card--today .day-card__abbr     { font-size: 14px; }
+.day-card--today .day-card__pulse-dot { width: 8px; height: 8px; }
 
 /* Right-side indicator circle */
 .day-card__indicator-wrap {
@@ -4672,13 +4673,29 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 
 /* Month summary — two stat cards side-by-side under the legend.
    Workouts orange, activities cyan, both expand on tap to show a named
-   breakdown ("Push A × 3, Pull A × 2"). */
+   breakdown ("Push A × 3, Pull A × 2"). When one card is expanded, the
+   other shrinks so the open card has room for the rich stats panel. */
 .calendar-summary {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   padding: 4px 16px 14px;
   align-items: start;
+  transition: grid-template-columns 0.2s;
+}
+/* When ANY card is open, give the open card the full row width so the
+   stats grid + breakdown have room. The closed sibling collapses to a
+   compact pill-style row at the top. We do this by stacking both cards
+   vertically when expanded; the open one renders full-width and the
+   closed one tags along underneath as a compact strip. */
+.calendar-summary--expanded {
+  grid-template-columns: 1fr;
+}
+.calendar-summary--expanded .calendar-summary-card:not(.calendar-summary-card--open) {
+  padding: 8px 14px;
+}
+.calendar-summary--expanded .calendar-summary-card:not(.calendar-summary-card--open) .calendar-summary-card__count {
+  font-size: 18px;
 }
 .calendar-summary-card {
   text-align: left;
@@ -4770,6 +4787,76 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   color: var(--text-muted);
   font-size: 11px;
   letter-spacing: 0.4px;
+  flex-shrink: 0;
+}
+
+/* Expanded summary panel — stats grid (sessions/time/PRs) + section
+   label + per-name breakdown list. Sits inside an open .calendar-summary-
+   card so the parent already has the kind-colored border. */
+.calendar-expanded {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.calendar-expanded__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.calendar-summary-card--activity .calendar-expanded__stats {
+  grid-template-columns: repeat(2, 1fr);
+}
+.calendar-expanded__stat {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.calendar-expanded__stat-val {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.4px;
+  line-height: 1.1;
+}
+.calendar-expanded__stat-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+.calendar-expanded__section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+}
+/* PR badge — small star + count, gold-tinted, sits between the exercise
+   name and the session-count column in the breakdown. */
+.calendar-pr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #FFB800;
+  background: rgba(255, 184, 0, 0.12);
+  border: 1px solid rgba(255, 184, 0, 0.4);
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
 
