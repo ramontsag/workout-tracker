@@ -18,6 +18,40 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
+// ── Weekly target bar ─────────────────────────────────────────
+// Slim horizontal bar — replaces the larger energy ring. Frees vertical
+// space for the day cards below. Same data, just compressed: count on
+// left, progress bar in the middle, target on the right.
+function WeeklyTargetBar({ completed, target, workouts, activities }) {
+  const safeTarget = Math.max(1, target || 1)
+  const pct        = Math.min(1, completed / safeTarget)
+  const over       = completed > target
+  const done       = completed > 0 && completed >= target
+  const stateClass = over ? 'wt-bar--over' : done ? 'wt-bar--done' : ''
+  // Tiny breakdown line under the bar — only show kinds that have any
+  // sessions so the line doesn't read "0 workouts · 0 activities".
+  const parts = []
+  if (workouts  > 0) parts.push(`${workouts} workout${workouts  !== 1 ? 's' : ''}`)
+  if (activities > 0) parts.push(`${activities} activit${activities !== 1 ? 'ies' : 'y'}`)
+  return (
+    <div className={`wt-bar ${stateClass}`}>
+      <div className="wt-bar__row">
+        <span className="wt-bar__num">{completed}</span>
+        <div className="wt-bar__track" aria-hidden>
+          <div className="wt-bar__fill" style={{ width: `${pct * 100}%` }} />
+        </div>
+        <span className="wt-bar__target">/ {target}</span>
+      </div>
+      <div className="wt-bar__caption">
+        {parts.length ? parts.join(' · ')
+         : over          ? 'Beast mode — over target'
+         : done          ? 'Target hit this week'
+         : 'No sessions yet this week'}
+      </div>
+    </div>
+  )
+}
+
 // ── Energy ring ───────────────────────────────────────────────
 // Multi-layer SVG: dim track + gradient progress arc (orange→cyan)
 // + leading-edge dot at the arc tip + soft halo glow that pulses when the
@@ -226,20 +260,18 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
         </button>
       </header>
 
-      {/* ── Weekly completion ring ───────────────────── */}
+      {/* ── Weekly completion bar ──────────────────────────
+          Compact bar replaces the ring. Frees ~80px of vertical real
+          estate so the day cards below can breathe. The fill animates as
+          sessions tick up; the kind colors reflect state (orange =
+          in-progress, green = done, amber = over). */}
       {weeklyProgress && (
-        <div className={`week-card${weekDone ? ' week-card--done' : ''}${weekOver ? ' week-card--over' : ''}`}>
-          <EnergyRing
-            completed={weeklyProgress.completed}
-            target={weeklyProgress.target}
-          />
-          <div className="week-card-text">
-            <div className="week-card-title">This week</div>
-            <div className={`week-card-sub${weekDone ? ' week-card-sub--done' : ''}${weekOver ? ' week-card-sub--over' : ''}`}>
-              {weeklyMessage(weeklyProgress.completed, weeklyProgress.target, weeklyProgress.workouts, weeklyProgress.activities)}
-            </div>
-          </div>
-        </div>
+        <WeeklyTargetBar
+          completed={weeklyProgress.completed}
+          target={weeklyProgress.target}
+          workouts={weeklyProgress.workouts}
+          activities={weeklyProgress.activities}
+        />
       )}
 
       {/* ── Weight bar ──────────────────────────────────── */}
@@ -304,6 +336,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
             const dayIdx    = DAY_ORDER.indexOf(day.name)
             const isToday   = dayIdx === todayIdx
             const isPast    = dayIdx >= 0 && dayIdx < todayIdx
+            const isFuture  = dayIdx >= 0 && dayIdx > todayIdx
             const items     = day.exercises || []
             const blocks    = day.workout_blocks || []
             const exItems   = items.filter(e => e.item_type !== 'activity')
@@ -384,7 +417,7 @@ export default function Home({ program, userId, profile, onSelectDay, onProfile,
             return (
               <div
                 key={day.id}
-                className={`day-card ${typeClass}${isToday ? ' day-card--today' : ''}${isPast ? ' day-card--past' : ''}`}
+                className={`day-card ${typeClass}${isToday ? ' day-card--today' : ''}${isPast ? ' day-card--past' : ''}${isFuture ? ' day-card--future' : ''}`}
                 style={{ animationDelay: `${i * 50}ms` }}
                 role="button"
                 tabIndex={0}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   logBodyWeight, getBodyWeightLogs,
   getExerciseNames, getVolumeHistory, getLiftSummary,
@@ -300,25 +300,29 @@ export default function ProgressScreen({ user, profile, onBack }) {
 
   useEffect(() => {
     if (!selectedExercise || !user?.id) return
+    let cancelled = false
     setVolumeLoading(true)
     setVolumeError('')
     getVolumeHistory(selectedExercise, user.id)
-      .then(data => { setVolumeHistory(data); setVolumeLoading(false) })
-      .catch(e  => { setVolumeError(e.message); setVolumeLoading(false) })
+      .then(data => { if (!cancelled) { setVolumeHistory(data); setVolumeLoading(false) } })
+      .catch(e  => { if (!cancelled) { setVolumeError(e.message); setVolumeLoading(false) } })
     // Pull headline-card metrics in parallel — single round-trip computes
     // every "fun number" the new Lift card displays.
     getLiftSummary(selectedExercise, user.id)
-      .then(setLiftSummary)
-      .catch(() => setLiftSummary(null))
+      .then(s => { if (!cancelled) setLiftSummary(s) })
+      .catch(() => { if (!cancelled) setLiftSummary(null) })
+    return () => { cancelled = true }
   }, [selectedExercise, user?.id])
 
   useEffect(() => {
     if (!selectedActivity || !user?.id) return
+    let cancelled = false
     setActivityLoading(true)
     setActivityError('')
     getActivityHistory(selectedActivity, user.id)
-      .then(data => { setActivityHistory(data); setActivityLoading(false) })
-      .catch(e  => { setActivityError(e.message); setActivityLoading(false) })
+      .then(data => { if (!cancelled) { setActivityHistory(data); setActivityLoading(false) } })
+      .catch(e  => { if (!cancelled) { setActivityError(e.message); setActivityLoading(false) } })
+    return () => { cancelled = true }
   }, [selectedActivity, user?.id])
 
   const handleLogWeight = async () => {
@@ -346,21 +350,29 @@ export default function ProgressScreen({ user, profile, onBack }) {
 
   // Volume sparkline values — raw kg·reps numbers. The chart is relative so
   // unit conversion here would only change the y-axis scale, not shape.
-  const volumeSparkValues = [...volumeHistory].reverse().map(s => s.totalVolume)
+  const volumeSparkValues = useMemo(
+    () => [...volumeHistory].reverse().map(s => s.totalVolume),
+    [volumeHistory]
+  )
 
   // ── Lifts tab derived ────────────────────────────────────
   // Date-range filter (client-side) + metric switch (volume vs e1RM). The
   // chart and the history list both read from this filtered+mapped slice.
-  const filteredVolumeHistory = (() => {
+  // Memoized so the filter doesn't rerun on every parent re-render (like
+  // when the user types in the bodyweight form).
+  const filteredVolumeHistory = useMemo(() => {
     if (liftsRange === 'all') return volumeHistory
     const days   = liftsRange === '6m' ? 180 : liftsRange === '3m' ? 90 : 28
     const cutoff = Date.now() - days * 86400000
     return volumeHistory.filter(s => new Date(s.date).getTime() >= cutoff)
-  })()
-  const liftsSparkValues = [...filteredVolumeHistory].reverse().map(s =>
-    liftsMetric === 'volume'
-      ? (unit === 'lbs' ? kgToLbs(s.totalVolume) : s.totalVolume)
-      : (unit === 'lbs' ? kgToLbs(s.maxE1RMkg || 0) : (s.maxE1RMkg || 0))
+  }, [volumeHistory, liftsRange])
+  const liftsSparkValues = useMemo(
+    () => [...filteredVolumeHistory].reverse().map(s =>
+      liftsMetric === 'volume'
+        ? (unit === 'lbs' ? kgToLbs(s.totalVolume) : s.totalVolume)
+        : (unit === 'lbs' ? kgToLbs(s.maxE1RMkg || 0) : (s.maxE1RMkg || 0))
+    ),
+    [filteredVolumeHistory, liftsMetric, unit]
   )
 
   // ── Strength tab derived ─────────────────────────────────
@@ -373,16 +385,17 @@ export default function ProgressScreen({ user, profile, onBack }) {
   const latestBwKg   = weightLogs[0]?.weight_kg ? Number(weightLogs[0].weight_kg) : 0
   const bwRatio      = latestBwKg > 0 ? totalE1RMkg / latestBwKg : null
 
-  // 4-week-ago snapshot for the per-slot delta arrows.
-  const fourWeeksAgo = Date.now() - 28 * 86400000
-  const snap4wAgo    = (() => {
+  // 4-week-ago snapshot for the per-slot delta arrows. Memoized to keep
+  // the iteration off every render's hot path.
+  const snap4wAgo = useMemo(() => {
+    const fourWeeksAgo = Date.now() - 28 * 86400000
     let last = null
     for (const s of strengthSeries) {
       if (new Date(s.date).getTime() <= fourWeeksAgo) last = s
       else break
     }
     return last
-  })()
+  }, [strengthSeries])
 
   // Trend dataset for the chart, in user's display unit so the y-axis labels
   // line up with the headline score. Each point also carries gym metadata so

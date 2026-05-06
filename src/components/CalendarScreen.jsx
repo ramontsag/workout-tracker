@@ -37,6 +37,9 @@ export default function CalendarScreen({ userId, onBack }) {
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState('')
   const [selectedDay, setSelectedDay] = useState(null)  // Date | null
+  // Which summary card is expanded — 'workouts' | 'activities' | null.
+  // Single-expanded model so the page doesn't grow unbounded.
+  const [expandedSummary, setExpandedSummary] = useState(null)
 
   const today = new Date()
 
@@ -65,6 +68,33 @@ export default function CalendarScreen({ userId, onBack }) {
       m[key].push(s)
     }
     return m
+  }, [sessions])
+
+  // Month-level stats: split into workouts vs activities, then within each,
+  // tally how many times each named session ran. Powers the summary cards
+  // below the calendar grid.
+  const monthStats = useMemo(() => {
+    const workoutCounts  = {}  // { name: count }
+    const activityCounts = {}
+    let workoutTotal  = 0
+    let activityTotal = 0
+    for (const s of sessions) {
+      const name = labelForSession(s)
+      if (s.kind === 'activity') {
+        activityCounts[name] = (activityCounts[name] || 0) + 1
+        activityTotal++
+      } else {
+        workoutCounts[name] = (workoutCounts[name] || 0) + 1
+        workoutTotal++
+      }
+    }
+    const sortByCount = (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+    return {
+      workoutTotal,
+      activityTotal,
+      workoutBreakdown:  Object.entries(workoutCounts).sort(sortByCount),
+      activityBreakdown: Object.entries(activityCounts).sort(sortByCount),
+    }
   }, [sessions])
 
   // Build the cells for the visible month. Pads with prev-month + next-month
@@ -179,6 +209,72 @@ export default function CalendarScreen({ userId, onBack }) {
             <span className="calendar-dot calendar-dot--hybrid" /> both
           </span>
         </div>
+
+        {/* Month summary — two stat cards + tap-to-expand breakdown.
+            Workout = orange, activity = cyan. Tapping a card reveals the
+            named breakdown for that kind ("Push A × 3, Pull A × 2"). */}
+        {(monthStats.workoutTotal > 0 || monthStats.activityTotal > 0) && (
+          <div className="calendar-summary">
+            <button
+              type="button"
+              className={`calendar-summary-card calendar-summary-card--workout${expandedSummary === 'workouts' ? ' calendar-summary-card--open' : ''}`}
+              onClick={() => setExpandedSummary(s => s === 'workouts' ? null : 'workouts')}
+              disabled={monthStats.workoutTotal === 0}
+              aria-expanded={expandedSummary === 'workouts'}
+            >
+              <div className="calendar-summary-card__top">
+                <span className="calendar-summary-card__count">{monthStats.workoutTotal}</span>
+                <span className="calendar-summary-card__label">
+                  {monthStats.workoutTotal === 1 ? 'workout' : 'workouts'}
+                </span>
+                {monthStats.workoutTotal > 0 && (
+                  <span className="calendar-summary-card__chev">
+                    {expandedSummary === 'workouts' ? '−' : '+'}
+                  </span>
+                )}
+              </div>
+              {expandedSummary === 'workouts' && monthStats.workoutBreakdown.length > 0 && (
+                <ul className="calendar-summary-card__list">
+                  {monthStats.workoutBreakdown.map(([name, n]) => (
+                    <li key={name} className="calendar-summary-row">
+                      <span className="calendar-summary-row__name">{name}</span>
+                      <span className="calendar-summary-row__count">× {n}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </button>
+            <button
+              type="button"
+              className={`calendar-summary-card calendar-summary-card--activity${expandedSummary === 'activities' ? ' calendar-summary-card--open' : ''}`}
+              onClick={() => setExpandedSummary(s => s === 'activities' ? null : 'activities')}
+              disabled={monthStats.activityTotal === 0}
+              aria-expanded={expandedSummary === 'activities'}
+            >
+              <div className="calendar-summary-card__top">
+                <span className="calendar-summary-card__count">{monthStats.activityTotal}</span>
+                <span className="calendar-summary-card__label">
+                  {monthStats.activityTotal === 1 ? 'activity' : 'activities'}
+                </span>
+                {monthStats.activityTotal > 0 && (
+                  <span className="calendar-summary-card__chev">
+                    {expandedSummary === 'activities' ? '−' : '+'}
+                  </span>
+                )}
+              </div>
+              {expandedSummary === 'activities' && monthStats.activityBreakdown.length > 0 && (
+                <ul className="calendar-summary-card__list">
+                  {monthStats.activityBreakdown.map(([name, n]) => (
+                    <li key={name} className="calendar-summary-row">
+                      <span className="calendar-summary-row__name">{name}</span>
+                      <span className="calendar-summary-row__count">× {n}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </button>
+          </div>
+        )}
 
         {loading && <div className="state-msg">Loading…</div>}
 
