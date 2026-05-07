@@ -442,13 +442,15 @@ a { color: inherit; text-decoration: none; }
 .day-card--empty  .day-card__focus { color: #555555; }
 
 /* Past days fade — eye lands on today first, but completion ✓s and
-   pills are still readable. Dropped to 0.5 so it's clearly "behind us"
-   without becoming illegible. */
+   pills are still readable. Lower opacity + desaturation pushes them
+   into the background so the user's focus snaps to today/upcoming. */
 .day-card--past {
-  opacity: 0.5;
+  opacity: 0.4;
+  filter: saturate(0.55);
 }
 .day-card--past.day-card--today {
   opacity: 1;
+  filter: none;
 }
 
 /* ── Day card size tiers ───────────────────────────────
