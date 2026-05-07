@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { getTemplates, deleteTemplate, applyTemplate } from '../supabase'
+import TemplateEditModal from './TemplateEditModal'
 
 function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
@@ -13,9 +14,21 @@ export default function ArchivesScreen({ user, program, onBack, onProgramUpdated
   const [applyState,  setApplyState]  = useState({}) // { [id]: { dayId, saving, done, error } }
   const [deletingId,  setDeletingId]  = useState(null)
   const [confirmId,   setConfirmId]   = useState(null) // id awaiting delete confirm
+  const [editingId,   setEditingId]   = useState(null) // id of template being edited
+
+  const reload = async () => {
+    if (!user?.id) return
+    try {
+      const t = await getTemplates(user.id)
+      setTemplates(t)
+    } catch (e) {
+      setError(e.message)
+    }
+  }
 
   useEffect(() => {
     if (!user?.id) return
+    setLoading(true)
     getTemplates(user.id)
       .then(t => { setTemplates(t); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -141,13 +154,22 @@ export default function ArchivesScreen({ user, program, onBack, onProgramUpdated
 
                   <div className="archive-delete-row">
                     {!isConfirming && (
-                      <button
-                        className="archive-delete-btn"
-                        onClick={() => setConfirmId(t.id)}
-                        disabled={isDeleting}
-                      >
-                        Delete
-                      </button>
+                      <>
+                        <button
+                          className="archive-edit-btn"
+                          onClick={() => setEditingId(t.id)}
+                          disabled={isDeleting}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="archive-delete-btn"
+                          onClick={() => setConfirmId(t.id)}
+                          disabled={isDeleting}
+                        >
+                          Delete
+                        </button>
+                      </>
                     )}
                     {isConfirming && (
                       <>
@@ -176,6 +198,14 @@ export default function ArchivesScreen({ user, program, onBack, onProgramUpdated
 
         <div style={{ height: 48 }} />
       </div>
+
+      <TemplateEditModal
+        open={!!editingId}
+        template={templates.find(t => t.id === editingId) || null}
+        userId={user?.id}
+        onClose={() => setEditingId(null)}
+        onSaved={reload}
+      />
     </div>
   )
 }

@@ -11,6 +11,7 @@ import ArchivesScreen  from './components/ArchivesScreen'
 import HistoryScreen   from './components/HistoryScreen'
 import CalendarScreen  from './components/CalendarScreen'
 import SettingsScreen  from './components/SettingsScreen'
+import ExerciseManagerScreen from './components/ExerciseManagerScreen'
 import FloatingTimer   from './components/FloatingTimer'
 import { stop as stopRestTimer } from './restTimerStore'
 import { clear as clearActiveWorkout } from './activeWorkoutStore'
@@ -259,6 +260,16 @@ export default function App() {
           onHistory={() => go('history-list')}
           onCalendar={() => go('calendar')}
           onSettings={() => go('settings')}
+          onExercises={() => go('exercises')}
+        />
+      )
+    }
+
+    if (screen === 'exercises') {
+      return (
+        <ExerciseManagerScreen
+          userId={user?.id}
+          onBack={() => go('profile')}
         />
       )
     }

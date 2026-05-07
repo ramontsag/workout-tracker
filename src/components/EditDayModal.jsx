@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { saveProgram, getAllKnownExerciseNames, getAllKnownActivityNames, deleteCustomItem, saveTemplate, deleteWorkoutBlock, updateWorkoutBlock } from '../supabase'
+import { saveProgram, getAllKnownExerciseNames, getAllKnownActivityNames, deleteCustomItem, saveTemplate, deleteWorkoutBlock, updateWorkoutBlock, applyBlockToTemplate } from '../supabase'
 import { getState as getRestTimerState, stop as stopRestTimer } from '../restTimerStore'
 import {
   FIELD_CATALOG, DEFAULT_ACTIVITY_FIELDS, defaultFieldsFor,
@@ -88,6 +88,9 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   const [infoOpen, setInfoOpen] = useState(false)
   const [tplStep,  setTplStep]  = useState({})  // { [blockId]: 'saving'|'done'|'limit' }
   const [tplError, setTplError] = useState('')
+  // Mirror of tplStep but for "Apply to template" — kept separate so both
+  // chips can fire independently and surface their own status text.
+  const [applyStep, setApplyStep] = useState({})  // { [blockId]: 'saving'|'done' }
   // Which block a "+ Add exercise" press is targeting. null = no picker open
   // (or activity picker, which has no block).
   const [pickerBlockId, setPickerBlockId] = useState(null)
@@ -265,6 +268,28 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
   const pickerOnPick  = pickerKind === 'activity'
     ? addActivity
     : (name) => addExercise(name, pickerBlockId)
+
+  // Push current draft's block exercises back into the template the block
+  // was seeded from. Disabled while dirty for the same reason as Save as
+  // template — the template should reflect the saved state, not in-flight
+  // edits the user might still discard.
+  const handleApplyToTemplate = async (block) => {
+    if (!block?.id || !block?.template_id) return
+    const blockExercises = draft.exercises
+      .filter(e => e.item_type !== 'activity' && (e.workout_block_id || null) === block.id)
+      .map(e => ({ name: e.name, target: e.target || '', item_type: 'exercise' }))
+    if (!blockExercises.length) { setTplError('Add at least one exercise'); return }
+    setTplError('')
+    setApplyStep(prev => ({ ...prev, [block.id]: 'saving' }))
+    try {
+      await applyBlockToTemplate(block.id, blockExercises, userId)
+      setApplyStep(prev => ({ ...prev, [block.id]: 'done' }))
+      setTimeout(() => setApplyStep(prev => ({ ...prev, [block.id]: null })), 1800)
+    } catch (e) {
+      setTplError(e.message)
+      setApplyStep(prev => ({ ...prev, [block.id]: null }))
+    }
+  }
 
   const handleSaveTemplate = async (block) => {
     const name = (block?.name || '').trim()
@@ -686,23 +711,46 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
                       >+ Add exercise</button>
 
                       {block.id && (
-                        <button
-                          type="button"
-                          className="tpl-save-chip block-card__tpl"
-                          onClick={() => handleSaveTemplate(block)}
-                          disabled={tplState === 'saving' || entries.length === 0 || isDirty}
-                          title={
-                            isDirty
-                              ? 'Tap "Save changes" first — templates capture the saved version.'
-                              : 'Save this workout as a reusable template'
-                          }
-                        >
-                          {tplState === 'saving' ? 'Saving…'
-                           : tplState === 'done'  ? '✓ Saved'
-                           : tplState === 'limit' ? 'Limit'
-                           : isDirty               ? 'Save day first'
-                           : '⌂ Save as template'}
-                        </button>
+                        <div className="block-card__tpl-row">
+                          <button
+                            type="button"
+                            className="tpl-save-chip"
+                            onClick={() => handleSaveTemplate(block)}
+                            disabled={tplState === 'saving' || entries.length === 0 || isDirty}
+                            title={
+                              isDirty
+                                ? 'Tap "Save changes" first — templates capture the saved version.'
+                                : 'Save this workout as a reusable template'
+                            }
+                          >
+                            {tplState === 'saving' ? 'Saving…'
+                             : tplState === 'done'  ? '✓ Saved'
+                             : tplState === 'limit' ? 'Limit'
+                             : isDirty               ? 'Save day first'
+                             : '⌂ Save as template'}
+                          </button>
+                          {block.template_id && (() => {
+                            const apState = applyStep[block.id]
+                            return (
+                              <button
+                                type="button"
+                                className="tpl-save-chip tpl-save-chip--apply"
+                                onClick={() => handleApplyToTemplate(block)}
+                                disabled={apState === 'saving' || entries.length === 0 || isDirty}
+                                title={
+                                  isDirty
+                                    ? 'Tap "Save changes" first — the template captures the saved version.'
+                                    : 'Push these changes back to the saved template'
+                                }
+                              >
+                                {apState === 'saving' ? 'Applying…'
+                                 : apState === 'done'  ? '✓ Applied'
+                                 : isDirty              ? 'Save day first'
+                                 : '↻ Apply to template'}
+                              </button>
+                            )
+                          })()}
+                        </div>
                       )}
                     </div>
                   )

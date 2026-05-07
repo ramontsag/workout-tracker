@@ -49,7 +49,7 @@ function measurementsSummary(last, unit) {
   return parts
 }
 
-export default function ProfileScreen({ user, totalWorkouts, totalActivities, onBack, onProgress, onArchives, onHistory, onCalendar, onSettings }) {
+export default function ProfileScreen({ user, totalWorkouts, totalActivities, onBack, onProgress, onArchives, onHistory, onCalendar, onSettings, onExercises }) {
   const [profile,        setProfile]       = useState(null)
   const [signingOut,     setSigningOut]    = useState(false)
   const [weeklyTarget,   setWeeklyTarget]  = useState(4)
@@ -319,6 +319,17 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
               <span className="profile-action-text">
                 <span className="profile-action-title">Calendar</span>
                 <span className="profile-action-sub">Month view of what you did</span>
+              </span>
+              <span className="profile-action-chevron">›</span>
+            </button>
+          )}
+
+          {onExercises && (
+            <button className="profile-action-btn" style={{ marginTop: 8 }} onClick={onExercises}>
+              <span className="profile-action-icon">🏋️</span>
+              <span className="profile-action-text">
+                <span className="profile-action-title">Exercises</span>
+                <span className="profile-action-sub">Heal split history when names drifted</span>
               </span>
               <span className="profile-action-chevron">›</span>
             </button>

@@ -1134,6 +1134,9 @@ export async function createWorkoutBlock(trainingDayId, name, uid, opts = {}) {
       training_day_id: trainingDayId,
       name:            (name || 'Workout').trim() || 'Workout',
       sort_order:      nextSort,
+      // Bind the block to its source template so "Apply changes to template"
+      // knows where to write back. Null when started blank.
+      template_id:     opts.fromTemplateId || null,
     }).select().single(),
     5000, 'Create workout block'
   )
@@ -1984,6 +1987,205 @@ export async function deleteTemplate(templateId, uid) {
     5000, 'Delete template'
   )
   if (error) throw new Error(`Delete failed: ${error.message}`)
+}
+
+// Update an existing template's name and exercise list. Used by the
+// Saved Workouts edit screen so the user can rework a template directly,
+// without going through the day-edit flow. Wipes and re-inserts
+// template_exercises since sort_order shifts on every reorder.
+//
+// `exercises`: [{ name, target?, item_type?, sort_order? }]  (sort_order
+// optional — index used as fallback)
+export async function updateTemplate(templateId, name, exercises, uid) {
+  if (!uid)        throw new Error('Not authenticated')
+  if (!templateId) throw new Error('No template id')
+
+  const trimmed = (name || '').trim()
+  if (!trimmed) throw new Error('Template name required')
+
+  const { error: tErr } = await withTimeout(
+    supabase.from('templates')
+      .update({ name: trimmed })
+      .eq('id', templateId)
+      .eq('user_id', uid),
+    5000, 'Rename template',
+  )
+  if (tErr) throw new Error(`Rename template failed: ${tErr.message}`)
+
+  // Wipe the old set of exercises before re-inserting. Cleaner than
+  // computing diffs and avoids stale rows when items are removed.
+  const { error: dErr } = await withTimeout(
+    supabase.from('template_exercises')
+      .delete()
+      .eq('template_id', templateId),
+    5000, 'Clear template exercises',
+  )
+  if (dErr) throw new Error(`Clear template exercises failed: ${dErr.message}`)
+
+  if (exercises && exercises.length) {
+    const rows = exercises.map((e, i) => ({
+      template_id:   templateId,
+      exercise_name: e.name,
+      item_type:     e.item_type || 'exercise',
+      target:        e.target || '',
+      sort_order:    i,
+    }))
+    const { error: iErr } = await withTimeout(
+      supabase.from('template_exercises').insert(rows),
+      5000, 'Save template exercises',
+    )
+    if (iErr) throw new Error(`Save template exercises failed: ${iErr.message}`)
+  }
+}
+
+// Append a single exercise to a template's exercise list — used when the
+// user adds an exercise mid-workout and opts to push it back to the
+// template the block was seeded from. Avoids the wipe-and-replace cost
+// of updateTemplate when we only want to extend.
+export async function addExerciseToTemplate(templateId, exerciseName, target, uid) {
+  if (!uid)        throw new Error('Not authenticated')
+  if (!templateId) throw new Error('No template id')
+  const name = (exerciseName || '').trim()
+  if (!name)       throw new Error('Name required')
+
+  // Skip if it's already on the template (case-insensitive) so we never
+  // create accidental duplicates from re-confirming the prompt.
+  const { data: existing, error: lErr } = await withTimeout(
+    supabase.from('template_exercises')
+      .select('exercise_name, sort_order')
+      .eq('template_id', templateId),
+    5000, 'Load template exercises',
+  )
+  if (lErr) throw new Error(`Load template failed: ${lErr.message}`)
+  const lower = (existing || []).map(e => (e.exercise_name || '').toLowerCase())
+  if (lower.includes(name.toLowerCase())) return
+  const nextOrder = (existing || []).reduce(
+    (m, e) => Math.max(m, (e.sort_order ?? 0) + 1),
+    0,
+  )
+  const { error: iErr } = await withTimeout(
+    supabase.from('template_exercises').insert({
+      template_id:   templateId,
+      exercise_name: name,
+      item_type:     'exercise',
+      target:        target || '',
+      sort_order:    nextOrder,
+    }),
+    5000, 'Add to template',
+  )
+  if (iErr) throw new Error(`Add to template failed: ${iErr.message}`)
+}
+
+// Push a day's block exercises back into the template the block was
+// seeded from. Lets the user tweak a workout on a specific day and then
+// promote those edits to the source template. Block-binding is via
+// workout_blocks.template_id (set in createWorkoutBlock when seeded
+// from a template, or backfilled by migrate_block_template_link.sql).
+//
+// `blockExercises`: [{ name, target?, item_type? }] in display order.
+// We treat the array order as authoritative for sort_order.
+export async function applyBlockToTemplate(blockId, blockExercises, uid) {
+  if (!uid)     throw new Error('Not authenticated')
+  if (!blockId) throw new Error('No block id')
+
+  const { data: block, error: bErr } = await withTimeout(
+    supabase.from('workout_blocks')
+      .select('id, name, template_id, user_id')
+      .eq('id', blockId)
+      .eq('user_id', uid)
+      .single(),
+    5000, 'Load block',
+  )
+  if (bErr) throw new Error(`Load block failed: ${bErr.message}`)
+  if (!block?.template_id) throw new Error('This workout is not linked to a template')
+
+  // Filter activities — templates only carry exercise-style items in this
+  // promote flow. Activities have their own logging shape and aren't part
+  // of the "saved workout" idea the user uses templates for.
+  const filtered = (blockExercises || [])
+    .filter(e => (e.item_type || 'exercise') !== 'activity')
+    .map(e => ({ name: e.name, target: e.target || '' }))
+
+  await updateTemplate(block.template_id, block.name || 'Workout', filtered, uid)
+}
+
+// ── Exercise history continuity ──────────────────────────────
+// Tools to surface and heal name-drift in past workout_sets data so the
+// "previous session" lookup keeps working when an exercise was logged
+// once under one spelling and then re-added under a slightly different
+// one (e.g. "Bench press" vs "Barbell bench press"). Forward-looking
+// drift is prevented by the catalog picker; this is for legacy data.
+
+// Lists every distinct exercise_name the user has ever logged a set
+// for, with the count of sets per name. Sorted descending by count so
+// the most-used names show up first. Useful as the source list for the
+// merge UI.
+export async function listLoggedExerciseNames(uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { data, error } = await withTimeout(
+    supabase.from('workout_sets')
+      .select('exercise_name')
+      .eq('user_id', uid),
+    5000, 'List logged exercise names',
+  )
+  if (error) throw new Error(`List names failed: ${error.message}`)
+  const counts = new Map()
+  for (const row of data || []) {
+    const n = (row.exercise_name || '').trim()
+    if (!n) continue
+    counts.set(n, (counts.get(n) || 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+}
+
+// Merge all workout_sets, template_exercises, and exercises rows from
+// `fromName` into `toName`. After this runs the two names act as one
+// exercise — history under the old spelling shows up as the new
+// spelling everywhere. uid is explicitly filtered so a malformed call
+// can never touch another user's data.
+//
+// This is intentionally a JS-side cascade rather than a SQL function
+// so RLS policies enforce ownership row-by-row; if any update fails we
+// throw and the user sees an error instead of a partial merge.
+export async function mergeExerciseHistory(fromName, toName, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const a = (fromName || '').trim()
+  const b = (toName   || '').trim()
+  if (!a || !b)  throw new Error('Both names required')
+  if (a === b)   throw new Error('Names are identical')
+
+  // workout_sets — the actual logged history
+  const { error: sErr } = await withTimeout(
+    supabase.from('workout_sets')
+      .update({ exercise_name: b })
+      .eq('user_id', uid)
+      .eq('exercise_name', a),
+    5000, 'Merge history (sets)',
+  )
+  if (sErr) throw new Error(`Merge sets failed: ${sErr.message}`)
+
+  // template_exercises — keep saved templates aligned
+  const { error: tErr } = await withTimeout(
+    supabase.from('template_exercises')
+      .update({ exercise_name: b })
+      .eq('exercise_name', a),
+    5000, 'Merge history (templates)',
+  )
+  if (tErr) throw new Error(`Merge templates failed: ${tErr.message}`)
+
+  // exercises — current program rows so the day still references the
+  // canonical name. Without this the next saveProgram would write the
+  // old spelling right back.
+  const { error: eErr } = await withTimeout(
+    supabase.from('exercises')
+      .update({ name: b })
+      .eq('user_id', uid)
+      .eq('name', a),
+    5000, 'Merge history (program)',
+  )
+  if (eErr) throw new Error(`Merge program failed: ${eErr.message}`)
 }
 
 // Apply a template to a training day as a NEW workout block — additive.

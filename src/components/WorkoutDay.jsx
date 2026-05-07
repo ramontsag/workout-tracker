@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   getLastSession, getPreviousSessionVolume, saveTemplate, getExerciseBests,
   getInProgressWorkout, upsertDraft, discardDraft,
-  addExerciseToProgram, removeExerciseFromProgram, getAllKnownExerciseNames, getAllKnownActivityNames,
+  addExerciseToProgram, addExerciseToTemplate, removeExerciseFromProgram, getAllKnownExerciseNames, getAllKnownActivityNames,
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
   insertCompletedSession, updateCompletedSession, completeWorkout,
   getTemplates, getLastSetsByExercise, updateExerciseSetCount,
@@ -1609,11 +1609,23 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   }
 
   const confirmAddToProgram = async () => {
-    const picked = addToProgramPrompt?.picked
+    const prompt = addToProgramPrompt
+    const picked = prompt?.picked
+    const alsoTemplate = !!prompt?.alsoTemplate
     setAddToProgramPrompt(null)
     if (!picked) return
     try {
       await addExerciseToProgram(day.id, picked, userId)
+      // Also push to the source template when the active block came from
+      // one and the user opted in. Best-effort — surface the failure but
+      // keep the program-add success so the workout doesn't feel broken.
+      if (alsoTemplate && block?.template_id) {
+        try {
+          await addExerciseToTemplate(block.template_id, picked.name, picked.target || '', userId)
+        } catch (te) {
+          setErrMsg(`Added to ${day.name}, but template update failed: ${te.message}`)
+        }
+      }
       onProgramUpdated && onProgramUpdated()
     } catch (e) {
       setErrMsg(`Couldn't add to program: ${e.message}`)
@@ -2536,6 +2548,18 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
               <strong>{addToProgramPrompt.picked.name}</strong> is in today's session.
               Do you also want to add it to {day.name}'s program permanently, so it shows up every {day.name}?
             </p>
+            {block?.template_id && (
+              <label className="modal-checkbox" style={{ marginTop: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={!!addToProgramPrompt.alsoTemplate}
+                  onChange={e => setAddToProgramPrompt(prev =>
+                    prev ? { ...prev, alsoTemplate: e.target.checked } : prev
+                  )}
+                />
+                Also add to "{block.name}" saved template
+              </label>
+            )}
             <div className="modal-actions">
               <button className="modal-btn-primary" onClick={confirmAddToProgram}>
                 Yes, add to {day.name}

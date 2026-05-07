@@ -42,6 +42,7 @@ export const EXERCISE_CATALOG = [
         'Seated cable row (wide)', 'Seated cable row (close)', 'Seated cable row (neutral)',
         'Single-arm cable row',
         'Machine row (low)', 'Machine row (high)',
+        'Iso-lateral row (machine)', 'Smith machine row',
         'Inverted row', 'Meadows row', 'Seal row',
       ] },
       { name: 'Lower back / erectors', items: [
@@ -51,6 +52,7 @@ export const EXERCISE_CATALOG = [
       { name: 'Traps', items: [
         'Shrug (barbell)', 'Shrug (dumbbell)', 'Shrug (cable)', 'Shrug (machine)',
         'Rack pull', 'Snatch-grip high pull',
+        'Trap-3 raise',
       ] },
     ],
   },
@@ -94,6 +96,7 @@ export const EXERCISE_CATALOG = [
         'Barbell curl', 'EZ-bar curl',
         'Dumbbell curl (standing)', 'Dumbbell curl (seated)',
         'Cable curl', 'Single-arm cable curl',
+        'Bicep curl machine',
       ] },
       { name: 'Brachialis / brachioradialis', items: [
         'Hammer curl (dumbbell)', 'Hammer curl (cable)', 'Cross-body hammer curl',
@@ -123,14 +126,17 @@ export const EXERCISE_CATALOG = [
     subgroups: [
       { name: 'Compound (bilateral)', items: [
         'Back squat (barbell)', 'Front squat', 'Goblet squat',
-        'Smith machine squat', 'Hack squat (machine)', 'Leg press',
+        'Smith machine squat', 'Hack squat (machine)', 'Pendulum squat',
+        'Leg press',
         'Box squat', 'Pause squat', 'Belt squat',
       ] },
       { name: 'Isolation', items: [
         'Leg extension', 'Single-leg extension', 'Sissy squat',
+        'Reverse Nordic curl',
       ] },
       { name: 'Unilateral', items: [
-        'Bulgarian split squat', 'Walking lunge', 'Reverse lunge',
+        'Bulgarian split squat', 'ATG split squat',
+        'Walking lunge', 'Reverse lunge',
         'Step-up', 'Pistol squat', 'Single-leg press',
       ] },
     ],
@@ -155,10 +161,13 @@ export const EXERCISE_CATALOG = [
     subgroups: [
       { name: 'Glute max (extension / thrust)', items: [
         'Hip thrust (barbell)', 'Hip thrust (machine)', 'Single-leg hip thrust',
-        'Glute bridge', 'Cable kickback',
+        'Glute bridge', 'Cable kickback', 'Glute kickback (machine)',
       ] },
       { name: 'Glute med / abductors', items: [
         'Cable abduction', 'Hip abduction (machine)', 'Banded side step', 'Clamshell',
+      ] },
+      { name: 'Adductors (inner thigh)', items: [
+        'Hip adduction (machine)', 'Cable adduction', 'Copenhagen plank',
       ] },
       { name: 'Squat-pattern (glute focus)', items: [
         'Sumo squat', 'Cossack squat', 'Curtsy lunge',
@@ -176,14 +185,19 @@ export const EXERCISE_CATALOG = [
       { name: 'Soleus (knee bent)', items: [
         'Seated calf raise (machine)', 'Seated calf raise (dumbbell)',
       ] },
+      { name: 'Tibialis (front shin)', items: [
+        'Tibialis raise (bodyweight)', 'Tibialis raise (weighted)',
+      ] },
     ],
   },
   {
     group: 'Core',
     subgroups: [
       { name: 'Upper abs (flexion)', items: [
-        'Crunch', 'Cable crunch', 'Decline sit-up', 'Sit-up',
+        'Crunch', 'Cable crunch', 'Standing cable crunch',
+        'Decline sit-up', 'Sit-up',
         'Weighted crunch', 'V-up',
+        'Ab crunch machine',
       ] },
       { name: 'Lower abs (hip flexion)', items: [
         'Hanging leg raise', 'Hanging knee raise', "Captain's chair leg raise",

@@ -2,19 +2,21 @@ import React from 'react'
 import { useRestTimer } from '../useRestTimer'
 import { useActiveWorkout } from '../useActiveWorkout'
 
-// Persistent floating pills — visible from any screen except the workout itself.
-//   Workout pill: shown while a workout is Started but not Completed. Tap returns to it.
-//   Rest pill: shown while the rest timer is running. Tap returns to it.
-// Both stack centred at the bottom of the screen.
+// Single persistent pill — visible from any screen except the workout itself.
+// Combines the workout-elapsed and rest-remaining counters into one orange
+// pill so we don't stack two visually-competing badges. The rest portion
+// only appears when a rest timer is active. Tap returns to the workout.
 export default function FloatingTimer({ onTap }) {
   const rest = useRestTimer()
   const active = useActiveWorkout()
 
-  const showRest    = rest.active && rest.total > 0
   const showWorkout = active.active
+  const showRest    = rest.active && rest.total > 0
 
-  if (!showRest && !showWorkout) return null
+  if (!showWorkout && !showRest) return null
 
+  // Rest-only state (active workout missing somehow): still show the pill so
+  // the rest timer remains tappable.
   const restMins = Math.floor(rest.remaining / 60)
   const restSecs = rest.remaining % 60
   const restLabel = restMins > 0
@@ -27,32 +29,28 @@ export default function FloatingTimer({ onTap }) {
   const s = elapsed % 60
   const pad = (n) => String(n).padStart(2, '0')
   const elapsedLabel = h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
-  const workoutTitle = active.blockName && active.blockName !== 'Workout'
-    ? active.blockName
-    : (active.dayName || 'Workout')
+
+  const dayId   = active.dayId   || rest.dayId
+  const blockId = active.blockId || rest.blockId
 
   return (
     <div className="floating-pills">
-      {showWorkout && (
-        <button
-          className="floating-pill floating-pill--workout"
-          onClick={() => onTap?.(active.dayId, active.blockId)}
-          title="Return to workout"
-        >
-          <span className="floating-pill-label">⏱ {workoutTitle} {elapsedLabel}</span>
-          <span className="floating-pill-arrow">→</span>
-        </button>
-      )}
-      {showRest && (
-        <button
-          className="floating-pill floating-pill--rest"
-          onClick={() => onTap?.(rest.dayId, rest.blockId)}
-          title="Return to workout"
-        >
-          <span className="floating-pill-label">Rest {restLabel}</span>
-          <span className="floating-pill-arrow">→</span>
-        </button>
-      )}
+      <button
+        className="floating-pill floating-pill--workout"
+        onClick={() => onTap?.(dayId, blockId)}
+        title="Return to workout"
+      >
+        <span className="floating-pill-label">
+          ⏱ {showWorkout ? elapsedLabel : '—'}
+          {showRest && (
+            <>
+              <span className="floating-pill-sep"> · </span>
+              <span className="floating-pill-rest">Rest {restLabel}</span>
+            </>
+          )}
+        </span>
+        <span className="floating-pill-arrow">→</span>
+      </button>
     </div>
   )
 }

@@ -2307,6 +2307,32 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   font-size: 13px;
   padding: 11px 12px;
 }
+/* When a block came from a template we surface two chips side by side:
+   "Save as template" and "Apply to template". Stack on narrow screens so
+   neither truncates. */
+.block-card__tpl-row {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.block-card__tpl-row > .tpl-save-chip {
+  flex: 1 1 calc(50% - 4px);
+  margin-left: 0;
+  font-size: 12px;
+  padding: 11px 10px;
+  text-align: center;
+}
+.tpl-save-chip--apply {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.tpl-save-chip--apply:hover    { background: #ff7124; }
+.tpl-save-chip--apply:disabled {
+  background: rgba(255, 85, 0, 0.30);
+  color: rgba(255, 255, 255, 0.85);
+}
 
 /* Workout block card inside Edit Day */
 .block-card {
@@ -2944,11 +2970,8 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   border-color: rgba(255, 85, 0, 0.45);
   background: rgba(255, 85, 0, 0.10);
 }
-.floating-pill--rest {
-  color: var(--cyan);
-  border-color: rgba(0, 194, 168, 0.45);
-  background: rgba(0, 194, 168, 0.10);
-}
+.floating-pill-sep { opacity: 0.55; }
+.floating-pill-rest { opacity: 0.85; font-weight: 500; }
 
 /* Timer on/off toggle in workout header */
 .timer-toggle {
@@ -3228,16 +3251,206 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .archive-delete-btn {
   padding: 7px 14px;
   background: none;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.archive-delete-btn:hover        { background: rgba(255, 85, 0, 0.10); }
+.archive-delete-btn:active       { border-color: #ef4444; color: #ef4444; }
+.archive-delete-btn--confirm     { border-color: #ef4444; color: #ef4444; background: rgba(239, 68, 68, 0.10); }
+.archive-delete-btn:disabled     { opacity: 0.5; cursor: default; }
+.archive-edit-btn {
+  padding: 7px 14px;
+  background: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--text-muted);
+  color: var(--text);
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
-.archive-delete-btn:active       { border-color: #ef4444; color: #ef4444; }
-.archive-delete-btn--confirm    { border-color: #ef4444; color: #ef4444; }
-.archive-delete-btn:disabled    { opacity: 0.5; cursor: default; }
+.archive-edit-btn:hover  { border-color: var(--text); }
+.archive-edit-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Template edit modal ──────────────────────────── */
+.template-edit-card {
+  max-width: 520px;
+  max-height: 88vh;
+  overflow: hidden;
+}
+.template-edit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.template-edit-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  padding: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.template-edit-row__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.template-edit-row__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.template-edit-row__target {
+  margin-bottom: 0;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.template-edit-row__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.template-edit-row__btn {
+  width: 32px;
+  height: 28px;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.template-edit-row__btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.template-edit-row__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.template-edit-row__btn--danger:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.template-edit-add-btn {
+  margin-top: 4px;
+  padding: 10px;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.template-edit-add-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── Exercise manager ─────────────────────────────── */
+.exmgr-dup-banner {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 85, 0, 0.10);
+  border: 1px solid rgba(255, 85, 0, 0.45);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.exmgr-selection {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.exmgr-selection__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-height: 22px;
+}
+.exmgr-selection__label {
+  color: var(--text-muted);
+  width: 56px;
+  flex-shrink: 0;
+}
+.exmgr-selection__name {
+  color: var(--text);
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.exmgr-selection__count {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+.exmgr-selection__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.exmgr-merge-btn { flex: 1; padding: 10px; }
+.exmgr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.exmgr-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.exmgr-row:hover { border-color: var(--text-dim); }
+.exmgr-row__name { flex: 1; }
+.exmgr-row__count {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+.exmgr-row--from {
+  border-color: var(--accent);
+  background: rgba(255, 85, 0, 0.10);
+}
+.exmgr-row--to {
+  border-color: var(--cyan);
+  background: rgba(0, 194, 168, 0.10);
+}
 .archive-cancel-inline-btn {
   padding: 7px 12px;
   background: none;
