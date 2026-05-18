@@ -328,8 +328,8 @@ export default function ProfileScreen({ user, totalWorkouts, totalActivities, on
             <button className="profile-action-btn" style={{ marginTop: 8 }} onClick={onExercises}>
               <span className="profile-action-icon">🏋️</span>
               <span className="profile-action-text">
-                <span className="profile-action-title">Exercises</span>
-                <span className="profile-action-sub">Heal split history when names drifted</span>
+                <span className="profile-action-title">Manage Exercises</span>
+                <span className="profile-action-sub">Rename, merge, or delete from your library</span>
               </span>
               <span className="profile-action-chevron">›</span>
             </button>

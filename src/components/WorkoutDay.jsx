@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   getLastSession, getPreviousSessionVolume, saveTemplate, getExerciseBests,
   getInProgressWorkout, upsertDraft, discardDraft,
-  addExerciseToProgram, addExerciseToTemplate, removeExerciseFromProgram, getAllKnownExerciseNames, getAllKnownActivityNames,
+  addExerciseToProgram, addExerciseToTemplate, applyBlockToTemplate, removeExerciseFromProgram, getAllKnownExerciseNames, getAllKnownActivityNames,
   updateDayMeta, updateWorkoutBlock, deleteCustomItem,
   insertCompletedSession, updateCompletedSession, completeWorkout,
   getTemplates, getLastSetsByExercise, updateExerciseSetCount,
@@ -948,10 +948,15 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     }
   }
 
-  // Whether a template already exists for this block — controls the
-  // visibility of the "Save as template…" menu item so the user can't keep
-  // re-saving the same workout.
-  const [templateExistsForBlock, setTemplateExistsForBlock] = useState(false)
+  // Source template for this block — the template this block was seeded
+  // from, if any. Drives the Save-as-Template "Update vs Save as new"
+  // choice and the History pill's visibility. Null if this is a scratch
+  // workout that didn't come from a template.
+  const [sourceTemplate, setSourceTemplate]               = useState(null)
+  // All of this user's existing template names (lowercased) — used to
+  // disable the Save-as-new Confirm button when the typed name collides
+  // (case-insensitively) with an existing template.
+  const [existingTemplateNames, setExistingTemplateNames] = useState([])
   // Most recent completed session for THIS block — drives the "History" pill
   // that lets the user re-open the last workout in edit mode (template-backed
   // blocks only). Null until loaded or if there's no prior session.
@@ -961,14 +966,15 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     let cancelled = false
     getTemplates(userId).then(list => {
       if (cancelled) return
-      const has = (list || []).some(t =>
-        t.day_id === day.id &&
-        (t.name || '').trim().toLowerCase() === (blockName || '').trim().toLowerCase()
+      const all = list || []
+      setExistingTemplateNames(
+        all.map(t => (t.name || '').trim().toLowerCase()).filter(Boolean)
       )
-      setTemplateExistsForBlock(has)
+      const src = block?.template_id ? all.find(t => t.id === block.template_id) : null
+      setSourceTemplate(src ? { id: src.id, name: src.name } : null)
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [userId, day.id, blockName])
+  }, [userId, block?.template_id])
 
   useEffect(() => {
     if (!userId) return
@@ -1905,19 +1911,56 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
   }, [editingCompletedId, userId])
 
   const handleArchiveTrigger = () => {
-    setArchiveName(blockName && blockName !== 'Workout' ? blockName : day.name)
-    setArchiveStep('naming')
+    setArchiveError('')
+    // If this block came from a template, ask Update vs Save-as-new first.
+    // Otherwise jump straight to the name input.
+    if (block?.template_id && sourceTemplate) {
+      setArchiveStep('choose')
+    } else {
+      setArchiveName(blockName && blockName !== 'Workout' ? blockName : day.name)
+      setArchiveStep('naming')
+    }
   }
 
+  // Update path — replace the source template's exercises with the current
+  // workout's contents. Template name and id stay unchanged.
+  const handleConfirmUpdate = async () => {
+    if (!sourceTemplate) return
+    setArchiveStep('updating')
+    setArchiveError('')
+    try {
+      await applyBlockToTemplate(blockId, exerciseList, userId)
+      setArchiveStep('done')
+    } catch (e) {
+      if (e.message === 'TEMPLATE_NOT_FOUND') {
+        // Source template was deleted out from under us. Fall back to
+        // save-as-new so the user can still capture their work.
+        setSourceTemplate(null)
+        setArchiveName(blockName && blockName !== 'Workout' ? blockName : day.name)
+        setArchiveError('That template no longer exists. Save as a new template instead.')
+        setArchiveStep('naming')
+      } else {
+        setArchiveError(e.message)
+        setArchiveStep('choose')
+      }
+    }
+  }
+
+  // Save-as-new path — insert a new template. Original (if any) untouched.
   const handleArchiveSave = async () => {
-    if (!archiveName.trim()) { setArchiveError('Enter a name'); return }
+    const trimmed = archiveName.trim()
+    if (!trimmed) { setArchiveError('Enter a name'); return }
+    // Case-insensitive duplicate-name check across ALL of this user's
+    // templates (not scoped to same-day).
+    if (existingTemplateNames.includes(trimmed.toLowerCase())) {
+      setArchiveError('A template with that name already exists')
+      return
+    }
     setArchiveStep('saving')
     setArchiveError('')
     try {
-      await saveTemplate(archiveName, day.id, exerciseList, userId)
+      await saveTemplate(trimmed, day.id, exerciseList, userId)
       setArchiveStep('done')
-      // Hide the menu entry so the user can't rapid-tap and stack duplicates.
-      setTemplateExistsForBlock(true)
     } catch (e) {
       if (e.message === 'LIMIT_REACHED') {
         setArchiveStep('limit')
@@ -1962,10 +2005,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
             <div className="workout-header__date">{todayLabel}</div>
           </div>
           {/* History pill — opens the most recent completed session for THIS
-              block in edit mode. Scoped to template-backed blocks (per the
-              owner's "only template workouts" rule) and only when there is a
-              prior session AND the user isn't mid-completion / mid-edit. */}
-          {templateExistsForBlock
+              block in edit mode. Scoped to template-backed blocks and only
+              when there is a prior session AND the user isn't mid-completion
+              / mid-edit. */}
+          {!!block?.template_id
             && previousBlockSession
             && !workoutDoneAt
             && !editingCompleted
@@ -1979,10 +2022,10 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
               <span className="header-history-pill__text">History</span>
             </button>
           )}
-          {/* Subtle "Save as template" pill — only shown while a template
-              for this block hasn't been saved yet. Quiet styling so it
-              encourages without competing with primary actions. */}
-          {!templateExistsForBlock && exerciseItems.length > 0 && archiveStep !== 'naming' && (
+          {/* Subtle "Save as template" pill — always visible while there
+              are exercises and the user isn't already in the archive flow.
+              Quiet styling so it doesn't compete with primary actions. */}
+          {exerciseItems.length > 0 && !editingCompleted && archiveStep === null && (
             <button
               type="button"
               className="header-template-pill"
@@ -2006,11 +2049,9 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
                   <button className="workout-menu-item" onClick={() => { setMenuOpen(false); setEditDayOpen(true) }}>
                     Edit day…
                   </button>
-                  {!templateExistsForBlock && (
-                    <button className="workout-menu-item" onClick={() => { setMenuOpen(false); handleArchiveTrigger() }}>
-                      Save as template…
-                    </button>
-                  )}
+                  <button className="workout-menu-item" onClick={() => { setMenuOpen(false); handleArchiveTrigger() }}>
+                    Save as template…
+                  </button>
                   <button
                     className="workout-menu-item"
                     onClick={() => {
@@ -2161,13 +2202,13 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
         {errMsg && <p className="err-msg">{errMsg}</p>}
 
         {/* Prominent "Save as template" CTA — promoted out of the gear menu
-            so users actually discover it. Only shown when:
+            so users actually discover it. Shown when:
               - there's at least one exercise to save
               - we're not currently editing a previously-completed workout
-              - a template for this block doesn't already exist
-              - the user hasn't already opened the naming form
-            Tapping opens the same naming form the menu item used. */}
-        {exerciseItems.length > 0 && !editingCompleted && !templateExistsForBlock && archiveStep !== 'naming' && (
+              - the user hasn't already opened the archive flow
+            Tapping opens the choose step (if this block came from a
+            template) or the naming form (if not). */}
+        {exerciseItems.length > 0 && !editingCompleted && archiveStep === null && (
           <button
             type="button"
             className="save-template-cta"
@@ -2222,27 +2263,102 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
           <div className="volume-msg">{volumeMsg}</div>
         )}
 
-        {archiveStep === 'naming' && (
+        {archiveStep === 'choose' && sourceTemplate && (
           <div className="archive-form">
             <div className="archive-form-label">Save workout as template</div>
-            <input
-              className="field-input"
-              placeholder="Template name…"
-              value={archiveName}
-              onChange={e => { setArchiveName(e.target.value); setArchiveError('') }}
-              onKeyDown={e => e.key === 'Enter' && handleArchiveSave()}
-              autoFocus
-            />
+            <div className="archive-form-actions" style={{ flexDirection: 'column', gap: 8 }}>
+              <button
+                className="archive-save-btn"
+                onClick={() => { setArchiveError(''); setArchiveStep('confirm-update') }}
+              >
+                Update "{sourceTemplate.name}"
+              </button>
+              <button
+                className="archive-save-btn"
+                onClick={() => {
+                  setArchiveName(blockName && blockName !== 'Workout' ? blockName : day.name)
+                  setArchiveError('')
+                  setArchiveStep('naming')
+                }}
+              >
+                Save as new
+              </button>
+              <button className="archive-cancel-btn" onClick={() => setArchiveStep(null)}>
+                Cancel
+              </button>
+            </div>
+            {archiveError && <div className="err-msg" style={{ marginTop: 4 }}>{archiveError}</div>}
+          </div>
+        )}
+
+        {archiveStep === 'confirm-update' && sourceTemplate && (
+          <div className="archive-form">
+            <div className="archive-form-label">
+              Update "{sourceTemplate.name}"?
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--text-muted, #888)', margin: '4px 0 8px' }}>
+              This will replace the template's exercises with the current workout.
+              Your past workouts logged under this template will not change.
+            </div>
             {archiveError && <div className="err-msg" style={{ marginTop: 4 }}>{archiveError}</div>}
             <div className="archive-form-actions">
-              <button className="archive-save-btn" onClick={handleArchiveSave}>Save</button>
-              <button className="archive-cancel-btn" onClick={() => setArchiveStep(null)}>Cancel</button>
+              <button className="archive-save-btn" onClick={handleConfirmUpdate}>
+                Update
+              </button>
+              <button className="archive-cancel-btn" onClick={() => setArchiveStep('choose')}>
+                Cancel
+              </button>
             </div>
           </div>
         )}
 
-        {archiveStep === 'saving' && (
-          <div className="archive-msg">Saving…</div>
+        {archiveStep === 'naming' && (() => {
+          const trimmed = archiveName.trim()
+          // Case-insensitive duplicate check across all of this user's
+          // templates. The Update path keeps the source template's name
+          // unchanged so never reaches this branch; this check is purely
+          // for Save-as-new.
+          const nameClash = !!trimmed && existingTemplateNames.includes(trimmed.toLowerCase())
+          const canSave   = !!trimmed && !nameClash
+          return (
+            <div className="archive-form">
+              <div className="archive-form-label">Save workout as new template</div>
+              <input
+                className="field-input"
+                placeholder="Template name…"
+                value={archiveName}
+                onChange={e => { setArchiveName(e.target.value); setArchiveError('') }}
+                onKeyDown={e => e.key === 'Enter' && canSave && handleArchiveSave()}
+                autoFocus
+              />
+              {nameClash && (
+                <div className="err-msg" style={{ marginTop: 4 }}>
+                  A template with that name already exists
+                </div>
+              )}
+              {archiveError && !nameClash && (
+                <div className="err-msg" style={{ marginTop: 4 }}>{archiveError}</div>
+              )}
+              <div className="archive-form-actions">
+                <button
+                  className="archive-save-btn"
+                  onClick={handleArchiveSave}
+                  disabled={!canSave}
+                >
+                  Save
+                </button>
+                <button className="archive-cancel-btn" onClick={() => setArchiveStep(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )
+        })()}
+
+        {(archiveStep === 'saving' || archiveStep === 'updating') && (
+          <div className="archive-msg">
+            {archiveStep === 'updating' ? 'Updating…' : 'Saving…'}
+          </div>
         )}
 
         {archiveStep === 'done' && (

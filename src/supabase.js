@@ -1920,6 +1920,8 @@ const TEMPLATE_LIMIT = 10
 
 // Save current day's exercises as a named template.
 // Throws 'LIMIT_REACHED' if the user already has 10 templates.
+// Activities (item_type === 'activity') are stripped — templates are
+// workout shells. Mirrors applyBlockToTemplate's behaviour.
 export async function saveTemplate(name, dayId, exercises, uid) {
   if (!uid) throw new Error('Not authenticated')
 
@@ -1940,10 +1942,12 @@ export async function saveTemplate(name, dayId, exercises, uid) {
   )
   if (tErr) throw new Error(`Save template failed: ${tErr.message}`)
 
-  if (exercises.length) {
+  const filtered = (exercises || []).filter(e => (e.item_type || 'exercise') !== 'activity')
+
+  if (filtered.length) {
     const { error: eErr } = await withTimeout(
       supabase.from('template_exercises').insert(
-        exercises.map((e, i) => ({
+        filtered.map((e, i) => ({
           template_id:   tmpl.id,
           exercise_name: e.name,
           item_type:     e.item_type || 'exercise',
@@ -1989,13 +1993,17 @@ export async function deleteTemplate(templateId, uid) {
   if (error) throw new Error(`Delete failed: ${error.message}`)
 }
 
-// Update an existing template's name and exercise list. Used by the
-// Saved Workouts edit screen so the user can rework a template directly,
-// without going through the day-edit flow. Wipes and re-inserts
-// template_exercises since sort_order shifts on every reorder.
+// Update an existing template's name and exercise list. Atomic via the
+// update_template RPC — rename + wipe + reinsert either all commit or
+// none do, so a network drop mid-call can never leave the template in
+// a half-replaced state.
 //
-// `exercises`: [{ name, target?, item_type?, sort_order? }]  (sort_order
-// optional — index used as fallback)
+// `exercises`: [{ name, target?, item_type? }] in display order. Array
+// order is authoritative for sort_order.
+//
+// Throws Error('TEMPLATE_NOT_FOUND') if the template was deleted between
+// when the caller loaded it and when this RPC ran. Callers should catch
+// that and fall back (typically to the save-as-new flow).
 export async function updateTemplate(templateId, name, exercises, uid) {
   if (!uid)        throw new Error('Not authenticated')
   if (!templateId) throw new Error('No template id')
@@ -2003,38 +2011,25 @@ export async function updateTemplate(templateId, name, exercises, uid) {
   const trimmed = (name || '').trim()
   if (!trimmed) throw new Error('Template name required')
 
-  const { error: tErr } = await withTimeout(
-    supabase.from('templates')
-      .update({ name: trimmed })
-      .eq('id', templateId)
-      .eq('user_id', uid),
-    5000, 'Rename template',
-  )
-  if (tErr) throw new Error(`Rename template failed: ${tErr.message}`)
+  const payload = (exercises || []).map(e => ({
+    name:      (e.name || '').trim(),
+    item_type: e.item_type || 'exercise',
+    target:    e.target    || '',
+  }))
 
-  // Wipe the old set of exercises before re-inserting. Cleaner than
-  // computing diffs and avoids stale rows when items are removed.
-  const { error: dErr } = await withTimeout(
-    supabase.from('template_exercises')
-      .delete()
-      .eq('template_id', templateId),
-    5000, 'Clear template exercises',
+  const { error } = await withTimeout(
+    supabase.rpc('update_template', {
+      p_user_id:     uid,
+      p_template_id: templateId,
+      p_name:        trimmed,
+      p_exercises:   payload,
+    }),
+    5000, 'Update template',
   )
-  if (dErr) throw new Error(`Clear template exercises failed: ${dErr.message}`)
-
-  if (exercises && exercises.length) {
-    const rows = exercises.map((e, i) => ({
-      template_id:   templateId,
-      exercise_name: e.name,
-      item_type:     e.item_type || 'exercise',
-      target:        e.target || '',
-      sort_order:    i,
-    }))
-    const { error: iErr } = await withTimeout(
-      supabase.from('template_exercises').insert(rows),
-      5000, 'Save template exercises',
-    )
-    if (iErr) throw new Error(`Save template exercises failed: ${iErr.message}`)
+  if (error) {
+    const msg = (error.message || '').toLowerCase()
+    if (msg.includes('template_not_found')) throw new Error('TEMPLATE_NOT_FOUND')
+    throw new Error(`Update template failed: ${error.message}`)
   }
 }
 
@@ -2082,6 +2077,14 @@ export async function addExerciseToTemplate(templateId, exerciseName, target, ui
 // workout_blocks.template_id (set in createWorkoutBlock when seeded
 // from a template, or backfilled by migrate_block_template_link.sql).
 //
+// Preserves the template's existing name — this flow only changes
+// exercises. Renaming the block has no effect on the template; renames
+// will live in their own dedicated UI.
+//
+// Throws Error('TEMPLATE_NOT_FOUND') if the block isn't linked to a
+// template (template_id null, or template row deleted). Callers should
+// catch and route to the save-as-new flow.
+//
 // `blockExercises`: [{ name, target?, item_type? }] in display order.
 // We treat the array order as authoritative for sort_order.
 export async function applyBlockToTemplate(blockId, blockExercises, uid) {
@@ -2097,95 +2100,151 @@ export async function applyBlockToTemplate(blockId, blockExercises, uid) {
     5000, 'Load block',
   )
   if (bErr) throw new Error(`Load block failed: ${bErr.message}`)
-  if (!block?.template_id) throw new Error('This workout is not linked to a template')
+  if (!block?.template_id) throw new Error('TEMPLATE_NOT_FOUND')
 
-  // Filter activities — templates only carry exercise-style items in this
-  // promote flow. Activities have their own logging shape and aren't part
-  // of the "saved workout" idea the user uses templates for.
+  // Load the template's CURRENT name so we pass it through unchanged.
+  // workout_blocks.template_id is ON DELETE SET NULL, so the block-level
+  // check above usually catches a deleted template; the fetch here is
+  // belt-and-braces for the rare race window.
+  const { data: tmpl, error: tErr } = await withTimeout(
+    supabase.from('templates')
+      .select('name')
+      .eq('id', block.template_id)
+      .eq('user_id', uid)
+      .maybeSingle(),
+    5000, 'Load template name',
+  )
+  if (tErr)  throw new Error(`Load template failed: ${tErr.message}`)
+  if (!tmpl) throw new Error('TEMPLATE_NOT_FOUND')
+
   const filtered = (blockExercises || [])
     .filter(e => (e.item_type || 'exercise') !== 'activity')
     .map(e => ({ name: e.name, target: e.target || '' }))
 
-  await updateTemplate(block.template_id, block.name || 'Workout', filtered, uid)
+  await updateTemplate(block.template_id, tmpl.name, filtered, uid)
 }
 
-// ── Exercise history continuity ──────────────────────────────
-// Tools to surface and heal name-drift in past workout_sets data so the
-// "previous session" lookup keeps working when an exercise was logged
-// once under one spelling and then re-added under a slightly different
-// one (e.g. "Bench press" vs "Barbell bench press"). Forward-looking
-// drift is prevented by the catalog picker; this is for legacy data.
+// ── Exercise library (Manage Exercises screen) ───────────────
+// The library is derived: union of every name in exercises (program) and
+// workout_sets (history). Each entry carries session_count (distinct
+// completed workouts of kind='workout' that included it) and last_used_at.
+// All rename / merge / delete operations route through atomic Postgres
+// functions in migrate_exercise_library_rpcs.sql.
 
-// Lists every distinct exercise_name the user has ever logged a set
-// for, with the count of sets per name. Sorted descending by count so
-// the most-used names show up first. Useful as the source list for the
-// merge UI.
-export async function listLoggedExerciseNames(uid) {
+export async function getExerciseLibrary(uid) {
   if (!uid) throw new Error('Not authenticated')
-  const { data, error } = await withTimeout(
-    supabase.from('workout_sets')
-      .select('exercise_name')
-      .eq('user_id', uid),
-    5000, 'List logged exercise names',
-  )
-  if (error) throw new Error(`List names failed: ${error.message}`)
-  const counts = new Map()
-  for (const row of data || []) {
-    const n = (row.exercise_name || '').trim()
-    if (!n) continue
-    counts.set(n, (counts.get(n) || 0) + 1)
+  const [setsRes, progRes] = await Promise.all([
+    withTimeout(
+      supabase.from('workout_sets')
+        .select('exercise_name, workout:workouts!inner(id, completed_at, kind, status)')
+        .eq('user_id', uid)
+        .eq('workouts.kind', 'workout')
+        .eq('workouts.status', 'completed'),
+      6000, 'Load library history'
+    ),
+    withTimeout(
+      supabase.from('exercises')
+        .select('name')
+        .eq('user_id', uid)
+        .eq('item_type', 'exercise'),
+      5000, 'Load library program'
+    ),
+  ])
+  if (setsRes.error) throw new Error(`Load library failed: ${setsRes.error.message}`)
+  if (progRes.error) throw new Error(`Load library failed: ${progRes.error.message}`)
+
+  const byName = new Map()
+  for (const row of (setsRes.data || [])) {
+    const name = (row.exercise_name || '').trim()
+    if (!name) continue
+    const wid = row.workout?.id
+    const ts  = row.workout?.completed_at || null
+    if (!byName.has(name)) byName.set(name, { name, workouts: new Set(), lastIso: null })
+    const e = byName.get(name)
+    if (wid) e.workouts.add(wid)
+    if (ts && (!e.lastIso || ts > e.lastIso)) e.lastIso = ts
   }
-  return [...counts.entries()]
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+  for (const row of (progRes.data || [])) {
+    const name = (row.name || '').trim()
+    if (!name) continue
+    if (!byName.has(name)) byName.set(name, { name, workouts: new Set(), lastIso: null })
+  }
+  return [...byName.values()]
+    .map(e => ({ name: e.name, session_count: e.workouts.size, last_used_at: e.lastIso }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-// Merge all workout_sets, template_exercises, and exercises rows from
-// `fromName` into `toName`. After this runs the two names act as one
-// exercise — history under the old spelling shows up as the new
-// spelling everywhere. uid is explicitly filtered so a malformed call
-// can never touch another user's data.
-//
-// This is intentionally a JS-side cascade rather than a SQL function
-// so RLS policies enforce ownership row-by-row; if any update fails we
-// throw and the user sees an error instead of a partial merge.
-export async function mergeExerciseHistory(fromName, toName, uid) {
+// True if any in-progress workout draft for this user references the
+// given exercise name (case-insensitive). Used by the Delete confirmation
+// to warn the user that an in-flight draft will lose its sets for this
+// exercise. Reads draft_state JSON in JS — a user has at most a handful
+// of in-progress drafts, so the cost is negligible.
+export async function exerciseInActiveDraft(name, uid) {
+  if (!uid || !name) return false
+  const target = name.trim().toLowerCase()
+  if (!target) return false
+  const { data, error } = await withTimeout(
+    supabase.from('workouts').select('draft_state')
+      .eq('user_id', uid)
+      .neq('status', 'completed'),
+    5000, 'Check drafts'
+  )
+  if (error || !data?.length) return false
+  for (const row of data) {
+    const ds = row.draft_state || {}
+    if (ds && typeof ds.sets === 'object' && ds.sets) {
+      for (const k of Object.keys(ds.sets)) {
+        if ((k || '').trim().toLowerCase() === target) return true
+      }
+    }
+    if (Array.isArray(ds?.exerciseList)) {
+      for (const e of ds.exerciseList) {
+        if ((e?.name || '').trim().toLowerCase() === target) return true
+      }
+    }
+  }
+  return false
+}
+
+// Atomic rename. Throws 'DUPLICATE_NAME' if target collides with an
+// unrelated existing name; UI maps that to an inline error.
+export async function renameExerciseLibrary(fromName, toName, uid) {
   if (!uid) throw new Error('Not authenticated')
-  const a = (fromName || '').trim()
-  const b = (toName   || '').trim()
-  if (!a || !b)  throw new Error('Both names required')
-  if (a === b)   throw new Error('Names are identical')
-
-  // workout_sets — the actual logged history
-  const { error: sErr } = await withTimeout(
-    supabase.from('workout_sets')
-      .update({ exercise_name: b })
-      .eq('user_id', uid)
-      .eq('exercise_name', a),
-    5000, 'Merge history (sets)',
+  const { error } = await withTimeout(
+    supabase.rpc('rename_exercise', {
+      p_user_id: uid, p_from: fromName, p_to: toName,
+    }),
+    6000, 'Rename exercise'
   )
-  if (sErr) throw new Error(`Merge sets failed: ${sErr.message}`)
+  if (error) {
+    if (/duplicate_name/.test(error.message)) throw new Error('DUPLICATE_NAME')
+    if (/names_required/.test(error.message)) throw new Error('NAME_REQUIRED')
+    throw new Error(`Rename failed: ${error.message}`)
+  }
+}
 
-  // template_exercises — keep saved templates aligned
-  const { error: tErr } = await withTimeout(
-    supabase.from('template_exercises')
-      .update({ exercise_name: b })
-      .eq('exercise_name', a),
-    5000, 'Merge history (templates)',
+// Atomic merge: from → to, then drops from from the user's library.
+export async function mergeExerciseLibrary(fromName, toName, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { error } = await withTimeout(
+    supabase.rpc('merge_exercise', {
+      p_user_id: uid, p_from: fromName, p_to: toName,
+    }),
+    8000, 'Merge exercise'
   )
-  if (tErr) throw new Error(`Merge templates failed: ${tErr.message}`)
+  if (error) throw new Error(`Merge failed: ${error.message}`)
+}
 
-  // exercises — current program rows so the day still references the
-  // canonical name. Without this the next saveProgram would write the
-  // old spelling right back.
-  const { error: eErr } = await withTimeout(
-    supabase.from('exercises')
-      .update({ name: b })
-      .eq('user_id', uid)
-      .eq('name', a),
-    5000, 'Merge history (program)',
+// Atomic delete: removes from history, program, and templates.
+export async function deleteExerciseLibrary(name, uid) {
+  if (!uid) throw new Error('Not authenticated')
+  const { error } = await withTimeout(
+    supabase.rpc('delete_exercise_completely', {
+      p_user_id: uid, p_name: name,
+    }),
+    6000, 'Delete exercise'
   )
-  if (eErr) throw new Error(`Merge program failed: ${eErr.message}`)
+  if (error) throw new Error(`Delete failed: ${error.message}`)
 }
 
 // Apply a template to a training day as a NEW workout block — additive.
