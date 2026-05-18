@@ -126,6 +126,16 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     }
   }, [open, day])
 
+  // Warn on tab close / refresh while there are pending edits. Cleans up
+  // as soon as the modal closes or the dirty state resolves so we don't
+  // leak the listener across modal lifecycles.
+  useEffect(() => {
+    if (!open || !isDirty) return
+    const handler = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [open, isDirty])
+
   useEffect(() => {
     if (!userId || !open) return
     getAllKnownExerciseNames(userId).then(setKnownExerciseNames).catch(() => {})
@@ -483,10 +493,30 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     }
   }
 
+  const handleDiscard = () => {
+    if (!isDirty) return
+    if (!window.confirm('Discard changes? This cannot be undone.')) return
+    const fresh = cloneDay(day)
+    setDraft(fresh)
+    setOpenSnapshot(JSON.stringify(fresh))
+    setPendingBlockDeletes([])
+    setPendingCustomDeletes([])
+    setPendingBlockCreates([])
+    setError('')
+  }
+
+  // Single close path so the backdrop and the × button share one
+  // confirmation prompt. When the modal is opened mid-workout, "Leave"
+  // closes just this sheet — the live workout underneath is unaffected.
+  const requestClose = () => {
+    if (isDirty && !window.confirm('Unsaved changes. Leave anyway?')) return
+    onClose()
+  }
+
   if (!open) return null
 
   return (
-    <div className="picker-overlay" onClick={onClose}>
+    <div className="picker-overlay" onClick={requestClose}>
       <div className="picker-sheet edit-day-sheet" onClick={e => e.stopPropagation()}>
         <div className="picker-header">
           <span className="picker-title">{draft.name}</span>
@@ -496,7 +526,7 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
             aria-label="How this works"
             title="How this works"
           >ⓘ</button>
-          <button className="picker-close" onClick={onClose} aria-label="Close">×</button>
+          <button className="picker-close" onClick={requestClose} aria-label="Close">×</button>
         </div>
 
         {/* Sticky action bar — single source of truth for committing edits.
@@ -504,6 +534,15 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
             to the bottom of long days. Disabled until something is dirty so
             it never reads "Save changes" when nothing's changed. */}
         <div className="edit-day-action-bar">
+          {isDirty && !saving && (
+            <button
+              className="edit-day-discard-btn"
+              onClick={handleDiscard}
+              disabled={saving || !isDirty}
+            >
+              Discard
+            </button>
+          )}
           <button
             className="edit-day-save-btn"
             onClick={handleSave}
@@ -516,6 +555,9 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
         </div>
 
         <div className="edit-day-body">
+          {isDirty && !saving && (
+            <div className="edit-day-banner" role="status">Unsaved changes</div>
+          )}
           {/* Workout name and rest live on each block now — see below. */}
 
           {/* Items list — grouped by type so the day is structured the same way

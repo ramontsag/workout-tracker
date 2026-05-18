@@ -3986,8 +3986,11 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   position: sticky;
   top: 0;
   z-index: 5;
+  display: flex;
+  gap: 8px;
 }
 .edit-day-save-btn {
+  flex: 1;
   width: 100%;
   padding: 12px 16px;
   background: var(--accent);
@@ -4011,6 +4014,40 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   box-shadow: none;
   cursor: default;
   letter-spacing: 0.3px;
+}
+/* Secondary destructive action — sits to the left of Save when dirty.
+   Outlined danger styling keeps the visual weight below the primary CTA
+   so accidental taps tilt toward Save, not Discard. */
+.edit-day-discard-btn {
+  flex: 1;
+  padding: 12px 16px;
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #ef4444;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.15s, background 0.15s;
+}
+.edit-day-discard-btn:hover    { background: rgba(239, 68, 68, 0.10); }
+.edit-day-discard-btn:active   { opacity: 0.85; }
+.edit-day-discard-btn:disabled { opacity: 0.5; cursor: default; }
+/* One-line dirty indicator at the top of the scroll body. Subtle so it
+   doesn't compete with the action bar — it's a status, not an alarm. */
+.edit-day-banner {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 85, 0, 0.10);
+  color: var(--accent);
+  border: 1px solid rgba(255, 85, 0, 0.25);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
 }
 .edit-day-body {
   flex: 1;
