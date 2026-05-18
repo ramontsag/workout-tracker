@@ -34,3 +34,11 @@ Deployed target: Vercel. Local dev: localhost:5173.
 - Print all SQL needed before touching any component
 - Never leave a spinner with no timeout
 
+## Subagent usage
+
+After making any code change that modifies behaviour (not just formatting), invoke the code-reviewer subagent on the diff before reporting completion to the user. Pass the diff and the spec/prompt that produced it.
+
+Before generating any migration SQL or writing code that assumes specific schema (column existence, constraint behaviour, RPC availability), invoke the schema-verifier subagent first with a summary of what schema the change requires. Wait for its verdict before producing the migration.
+
+If the user is asking for a small UI tweak that doesn't touch the database and is too small to need review (single-line copy change, color tweak), the code-reviewer can be skipped. Use judgment.
+

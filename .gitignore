@@ -4,3 +4,15 @@ dist
 .DS_Store
 .env
 .env.local
+
+# Local Claude Code / agent tooling — keep .claude/agents/ tracked so subagent
+# definitions ship with the repo, but ignore session-local settings and skills.
+.claude/settings.local.json
+.claude/skills/
+.agents/
+.mcp.json
+skills-lock.json
+
+# Working notes — research scratch, not product.
+current_state_inventory.md
+intent_behaviour_dive.md
