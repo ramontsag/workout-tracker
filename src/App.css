@@ -981,6 +981,9 @@ a { color: inherit; text-decoration: none; }
    before they finish logging it. Styled as an eye-catching outlined card
    so it reads as primary-secondary, never competes with the main Complete
    button. */
+/* Primary "Save as template" CTA — only rendered when the active block has
+   no source template. Solid accent fill + white text so it reads as the
+   primary action it is (the previous translucent gradient looked optional). */
 .save-template-cta {
   display: flex;
   flex-direction: column;
@@ -990,20 +993,20 @@ a { color: inherit; text-decoration: none; }
   margin-top: 18px;
   padding: 18px 20px;
   border-radius: var(--radius);
-  background: linear-gradient(180deg, rgba(255,85,0,0.18), rgba(255,85,0,0.06));
-  border: 2px solid var(--accent);
-  color: var(--text);
+  background: var(--accent);
+  border: 0;
+  color: #fff;
   text-align: center;
   cursor: pointer;
-  transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.1s ease, background 0.15s ease, box-shadow 0.15s ease;
   -webkit-tap-highlight-color: transparent;
   position: relative;
-  box-shadow: 0 4px 14px rgba(255, 85, 0, 0.20);
+  box-shadow: 0 6px 22px rgba(255, 85, 0, 0.36);
 }
 .save-template-cta:active { transform: scale(0.98); }
 .save-template-cta:hover {
-  background: linear-gradient(180deg, rgba(255,85,0,0.26), rgba(255,85,0,0.10));
-  box-shadow: 0 6px 20px rgba(255, 85, 0, 0.30);
+  background: #ff6b1f;
+  box-shadow: 0 8px 28px rgba(255, 85, 0, 0.44);
 }
 .save-template-cta__text {
   font-family: var(--font-display);
@@ -1011,14 +1014,58 @@ a { color: inherit; text-decoration: none; }
   font-weight: 800;
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  color: var(--accent);
+  color: #fff;
   line-height: 1.1;
 }
 .save-template-cta__hint {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.85);
   letter-spacing: 0.3px;
+}
+
+/* Compact chip — shown instead of the big CTA when this block is already
+   saved as a template. Keeps the Update affordance reachable without
+   dominating the screen. */
+.save-template-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.save-template-chip:hover { background: var(--surface3); border-color: var(--accent); }
+.save-template-chip:active { opacity: 0.9; }
+.save-template-chip__check {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 800;
+}
+.save-template-chip__label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.save-template-chip__label strong { color: var(--text); font-weight: 700; }
+.save-template-chip__action {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
 }
 
 .err-msg {
@@ -3251,30 +3298,31 @@ select.field-input option { background: #141414; color: #e0e0e0; }
 .archive-delete-btn {
   padding: 7px 14px;
   background: none;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--accent);
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.archive-delete-btn:hover        { background: rgba(255, 85, 0, 0.10); }
+.archive-delete-btn:hover        { border-color: #ef4444; color: #ef4444; background: rgba(239, 68, 68, 0.06); }
 .archive-delete-btn:active       { border-color: #ef4444; color: #ef4444; }
 .archive-delete-btn--confirm     { border-color: #ef4444; color: #ef4444; background: rgba(239, 68, 68, 0.10); }
 .archive-delete-btn:disabled     { opacity: 0.5; cursor: default; }
 .archive-edit-btn {
   padding: 7px 14px;
-  background: none;
-  border: 1px solid var(--border);
+  background: var(--accent);
+  border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
-  color: var(--text);
+  color: #fff;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
-.archive-edit-btn:hover  { border-color: var(--text); }
+.archive-edit-btn:hover    { background: #ff6b1f; border-color: #ff6b1f; }
+.archive-edit-btn:active   { opacity: 0.9; }
 .archive-edit-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Template edit modal ──────────────────────────── */
@@ -3986,11 +4034,8 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   position: sticky;
   top: 0;
   z-index: 5;
-  display: flex;
-  gap: 8px;
 }
 .edit-day-save-btn {
-  flex: 1;
   width: 100%;
   padding: 12px 16px;
   background: var(--accent);
@@ -4014,40 +4059,6 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   box-shadow: none;
   cursor: default;
   letter-spacing: 0.3px;
-}
-/* Secondary destructive action — sits to the left of Save when dirty.
-   Outlined danger styling keeps the visual weight below the primary CTA
-   so accidental taps tilt toward Save, not Discard. */
-.edit-day-discard-btn {
-  flex: 1;
-  padding: 12px 16px;
-  background: transparent;
-  color: #ef4444;
-  border: 1px solid #ef4444;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition: opacity 0.15s, background 0.15s;
-}
-.edit-day-discard-btn:hover    { background: rgba(239, 68, 68, 0.10); }
-.edit-day-discard-btn:active   { opacity: 0.85; }
-.edit-day-discard-btn:disabled { opacity: 0.5; cursor: default; }
-/* One-line dirty indicator at the top of the scroll body. Subtle so it
-   doesn't compete with the action bar — it's a status, not an alarm. */
-.edit-day-banner {
-  margin: 0 0 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(255, 85, 0, 0.10);
-  color: var(--accent);
-  border: 1px solid rgba(255, 85, 0, 0.25);
-  font-size: 13px;
-  font-weight: 600;
-  text-align: center;
 }
 .edit-day-body {
   flex: 1;
@@ -4451,6 +4462,34 @@ select.field-input option { background: #141414; color: #e0e0e0; }
   font-style: italic;
 }
 .history-set-row--warmup .history-set-num { color: var(--cyan); }
+/* Trailing mode pills — sit at the right end of a set row. Warmups
+   already carry an italic + cyan treatment via row class; these pills
+   tag check / drop, which are orthogonal to warmup. */
+.history-set-pills {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+}
+.history-set-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.history-set-pill--check {
+  background: rgba(34, 197, 94, 0.14);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.30);
+}
+.history-set-pill--drop {
+  background: rgba(255, 85, 0, 0.14);
+  color: var(--accent);
+  border: 1px solid rgba(255, 85, 0, 0.30);
+}
 
 /* ── Tranche 2: hybrid activities ─────────────────── */
 /* Program-setup field picker pills */

@@ -493,21 +493,10 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
     }
   }
 
-  const handleDiscard = () => {
-    if (!isDirty) return
-    if (!window.confirm('Discard changes? This cannot be undone.')) return
-    const fresh = cloneDay(day)
-    setDraft(fresh)
-    setOpenSnapshot(JSON.stringify(fresh))
-    setPendingBlockDeletes([])
-    setPendingCustomDeletes([])
-    setPendingBlockCreates([])
-    setError('')
-  }
-
   // Single close path so the backdrop and the × button share one
-  // confirmation prompt. When the modal is opened mid-workout, "Leave"
-  // closes just this sheet — the live workout underneath is unaffected.
+  // confirmation prompt — that IS the discard flow. No separate Discard
+  // button. When the modal is opened mid-workout, "Leave" closes just
+  // this sheet; the live workout underneath is unaffected.
   const requestClose = () => {
     if (isDirty && !window.confirm('Unsaved changes. Leave anyway?')) return
     onClose()
@@ -529,35 +518,23 @@ export default function EditDayModal({ open, onClose, day, program, userId, onSa
           <button className="picker-close" onClick={requestClose} aria-label="Close">×</button>
         </div>
 
-        {/* Sticky action bar — single source of truth for committing edits.
-            Pinned right under the header so it's reachable without scrolling
-            to the bottom of long days. Disabled until something is dirty so
-            it never reads "Save changes" when nothing's changed. */}
-        <div className="edit-day-action-bar">
-          {isDirty && !saving && (
+        {/* Sticky action bar — only rendered when there's something to save.
+            Closing the modal via × or backdrop is the discard path (it
+            triggers the unsaved-changes prompt), so there's no separate
+            Discard button to add redundancy here. */}
+        {(isDirty || saving) && (
+          <div className="edit-day-action-bar">
             <button
-              className="edit-day-discard-btn"
-              onClick={handleDiscard}
-              disabled={saving || !isDirty}
+              className="edit-day-save-btn"
+              onClick={handleSave}
+              disabled={saving}
             >
-              Discard
+              {saving ? 'Saving…' : 'Save changes'}
             </button>
-          )}
-          <button
-            className="edit-day-save-btn"
-            onClick={handleSave}
-            disabled={saving || !isDirty}
-          >
-            {saving       ? 'Saving…'
-             : !isDirty   ? 'No unsaved changes'
-             :              'Save changes'}
-          </button>
-        </div>
+          </div>
+        )}
 
         <div className="edit-day-body">
-          {isDirty && !saving && (
-            <div className="edit-day-banner" role="status">Unsaved changes</div>
-          )}
           {/* Workout name and rest live on each block now — see below. */}
 
           {/* Items list — grouped by type so the day is structured the same way

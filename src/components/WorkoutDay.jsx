@@ -1710,17 +1710,57 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
     }
   }
 
+  // Count tracked-mode sets that the user touched but left half-filled or
+  // empty (would be silently dropped on save). Warmups and unchecked
+  // check-mode rows are intentional non-logs and aren't counted. Drop sets
+  // ARE counted — an empty drop is the same kind of leftover as an empty
+  // regular working set.
+  const countEmptySets = () => {
+    let count = 0
+    const trackModeMap = buildTrackModeMap()
+    for (const ex of exerciseList) {
+      if (ex.item_type === 'activity') continue
+      const isCheck = trackModeMap[ex.name] === 'check'
+      if (isCheck) continue
+      const arr = sets[ex.name] || []
+      for (const r of arr) {
+        if (r.is_warmup) continue
+        if (r.checked) continue
+        const w = String(r.weight ?? '').trim()
+        const reps = String(r.reps ?? '').trim()
+        const wBlank = w === '' || Number(w) === 0
+        const rBlank = reps === '' || Number(reps) === 0
+        if (wBlank || rBlank) count += 1
+      }
+    }
+    return count
+  }
+
+  // null when the empty-set confirmation isn't showing, or
+  // { count } while the user decides whether to proceed.
+  const [emptySetConfirm, setEmptySetConfirm] = useState(null)
+
   // Complete the gym block (kind='workout') only — does not touch activities.
   // We transition the existing draft row in place via completeWorkout so the
   // workout id stays stable: the post-completion "Edit" path then targets the
   // SAME row and updateCompletedSession finds it. If autosave hasn't fired yet
   // (the user logged and tapped Complete inside the 5s debounce) we force a
   // synchronous draft create here so there's always a row to transition.
-  const handleCompleteWorkout = async () => {
+  //
+  // opts.skipEmptyCheck — set by the empty-set confirmation modal to bypass
+  // the check after the user has explicitly chosen "Complete anyway".
+  const handleCompleteWorkout = async (opts = {}) => {
     const hasExerciseData = Object.values(sets).some(s => s.some(r => r.weight !== '' || r.reps !== '' || r.checked))
     if (!hasExerciseData) {
       setErrMsg('Log at least one set first.')
       return
+    }
+    if (!opts.skipEmptyCheck) {
+      const emptyCount = countEmptySets()
+      if (emptyCount > 0) {
+        setEmptySetConfirm({ count: emptyCount })
+        return
+      }
     }
     setStatus('saving')
     setErrMsg('')
@@ -2201,42 +2241,65 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
 
         {errMsg && <p className="err-msg">{errMsg}</p>}
 
-        {/* Prominent "Save as template" CTA — promoted out of the gear menu
-            so users actually discover it. Shown when:
-              - there's at least one exercise to save
-              - we're not currently editing a previously-completed workout
-              - the user hasn't already opened the archive flow
-            Tapping opens the choose step (if this block came from a
-            template) or the naming form (if not). */}
+        {/* Save-as-template CTA — promoted out of the gear menu so users
+            actually discover it. Two visual modes:
+              - sourceTemplate === null  → big primary-styled CTA. This
+                workout has never been saved, so push the user toward it.
+              - sourceTemplate !== null  → compact chip showing the name
+                of the template this workout came from, with an Update
+                affordance. The big CTA would be redundant since the
+                workout is already saved; the chip keeps the action
+                accessible without dominating the screen.
+            Both tap into handleArchiveTrigger, which routes to the
+            choose / naming step based on sourceTemplate. */}
         {exerciseItems.length > 0 && !editingCompleted && archiveStep === null && (
-          <button
-            type="button"
-            className="save-template-cta"
-            onClick={handleArchiveTrigger}
-            title="Save this workout's structure as a reusable template"
-          >
-            <span className="save-template-cta__text">Save as template</span>
-            <span className="save-template-cta__hint">Reuse the structure on any day</span>
-          </button>
+          sourceTemplate ? (
+            <button
+              type="button"
+              className="save-template-chip"
+              onClick={handleArchiveTrigger}
+              title={`Saved as "${sourceTemplate.name}" — tap to update or save as new`}
+            >
+              <span className="save-template-chip__check">✓</span>
+              <span className="save-template-chip__label">Saved as <strong>{sourceTemplate.name}</strong></span>
+              <span className="save-template-chip__action">Update</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="save-template-cta"
+              onClick={handleArchiveTrigger}
+              title="Save this workout's structure as a reusable template"
+            >
+              <span className="save-template-cta__text">Save as template</span>
+              <span className="save-template-cta__hint">Reuse the structure on any day</span>
+            </button>
+          )
         )}
 
         {/* Bottom button only completes the gym block. Activities each have
             their own Mark-done button. Hidden once the workout is done.
             In edit-completed mode, label changes and the handler routes to
             updateCompletedSession instead of insertCompletedSession. */}
-        {exerciseItems.length > 0 && !workoutDoneAt && (
-          <button
-            className={`complete-btn ${status === 'saved' ? 'complete-btn--saved' : ''}`}
-            onClick={editingCompleted ? handleSaveEdit : handleCompleteWorkout}
-            disabled={status === 'saving'}
-          >
-            {status === 'saving'
-              ? 'Saving…'
-              : editingCompleted
-                ? 'Save changes'
-                : 'Complete Workout'}
-          </button>
-        )}
+        {exerciseItems.length > 0 && !workoutDoneAt && (() => {
+          // Disable when nothing's been logged — the empty-set check below
+          // only runs after the user taps Complete, but disabling here
+          // keeps the "Log at least one set first" error from ever firing.
+          const hasAnyLoggedData = Object.values(sets).some(s => s.some(r => r.weight !== '' || r.reps !== '' || r.checked))
+          return (
+            <button
+              className={`complete-btn ${status === 'saved' ? 'complete-btn--saved' : ''}`}
+              onClick={() => editingCompleted ? handleSaveEdit() : handleCompleteWorkout()}
+              disabled={status === 'saving' || (!editingCompleted && !hasAnyLoggedData)}
+            >
+              {status === 'saving'
+                ? 'Saving…'
+                : editingCompleted
+                  ? 'Save changes'
+                  : 'Complete Workout'}
+            </button>
+          )
+        })()}
 
         {/* Tap "Edit" on the banner to fix a logging mistake — the cards
             re-open with the saved values still there, and Save updates the
@@ -2480,6 +2543,37 @@ export default function WorkoutDay({ day, program, userId, profile, onBack, onHi
               <button className="modal-btn-cancel" onClick={() => setActiveBlockedBy(null)}>
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Empty-set confirmation on Complete ─────────────────
+          Surfaces sets the user touched but left half-filled. They'd be
+          silently dropped on save (see completeWorkout's per-row parse),
+          so we make the loss explicit before it happens. Warmups and
+          unchecked check-mode rows don't count — those aren't accidents. */}
+      {emptySetConfirm && (
+        <div className="modal-backdrop" onClick={() => status !== 'saving' && setEmptySetConfirm(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <h3 className="modal-title">Complete with empty sets?</h3>
+            <p className="modal-body">
+              You have {emptySetConfirm.count} set{emptySetConfirm.count === 1 ? '' : 's'} with empty values. They won't be saved to history. Complete anyway, or go back and fill them in?
+            </p>
+            <div className="modal-actions">
+              <button
+                className="modal-btn-primary"
+                disabled={status === 'saving'}
+                onClick={() => {
+                  setEmptySetConfirm(null)
+                  handleCompleteWorkout({ skipEmptyCheck: true })
+                }}
+              >Complete anyway</button>
+              <button
+                className="modal-btn-cancel"
+                disabled={status === 'saving'}
+                onClick={() => setEmptySetConfirm(null)}
+              >Back to workout</button>
             </div>
           </div>
         </div>

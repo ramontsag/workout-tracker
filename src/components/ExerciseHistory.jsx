@@ -23,14 +23,14 @@ export default function ExerciseHistory({ exercise, profile, userId, onBack }) {
       .finally(() => setLoading(false))
   }, [exercise, userId])
 
-  // Sum in kg, excluding warmups AND drop sets — matches the volume rule used
-  // on Progress > Lifts (`getVolumeHistory` in supabase.js). Drop sets are
-  // assistance burnouts after a top set; counting them inflates this screen's
-  // volume vs. the dashboard, which made the same exercise read two different
-  // numbers in two places.
+  // Volume sum in kg. Warmups excluded (preparatory, not work). Drop sets
+  // INCLUDED — they're real work even if assistance-weighted, and this
+  // matches getVolumeHistory in supabase.js (the Progress > Lifts source
+  // of truth). Checked-mode rows store weight=0 and reps=0, so they
+  // contribute zero naturally without needing a separate filter.
   const volumeKg = (sets) =>
     sets
-      .filter(s => !s.is_warmup && !s.is_drop_set)
+      .filter(s => !s.is_warmup)
       .reduce((acc, s) => acc + (s.weight_kg || 0) * (s.reps || 0), 0)
 
   // Client-side range filter — 'all' shows everything; the rest cap at the
@@ -128,14 +128,31 @@ export default function ExerciseHistory({ exercise, profile, userId, onBack }) {
                       </div>
                     )
                   }
+                  // Mode is implicit in the row shape (see Finding A):
+                  //   checked + weight=0 + reps=0  → check-mode log
+                  //   is_drop_set                  → drop set (real work)
+                  //   is_warmup                    → warmup
+                  // Warmup / drop / check are orthogonal — a warmup drop
+                  // set would render two pills.
+                  const isCheck = !!s.checked && !s.weight_kg && !s.reps
+                  const isDrop  = !!s.is_drop_set
+                  const isWarmup = !!s.is_warmup
                   return (
-                    <div key={idx} className={`history-set-row ${s.is_warmup ? 'history-set-row--warmup' : ''}`}>
+                    <div key={idx} className={`history-set-row ${isWarmup ? 'history-set-row--warmup' : ''}`}>
                       <span className="history-set-num">
-                        {s.is_warmup ? 'Warmup' : `Set ${s.set_number}`}
+                        {isWarmup ? 'Warmup' : `Set ${s.set_number}`}
                       </span>
                       <span className="history-set-vals">
-                        {s.weight_kg ? `${displayWeight(s.weight_kg, unit)} ${label}` : '—'} × {fmt(s.reps)} reps
+                        {isCheck
+                          ? '✓ Checked'
+                          : <>{s.weight_kg ? `${displayWeight(s.weight_kg, unit)} ${label}` : '—'} × {fmt(s.reps)} reps</>}
                       </span>
+                      {(isCheck || isDrop) && (
+                        <span className="history-set-pills">
+                          {isCheck && <span className="history-set-pill history-set-pill--check">Check</span>}
+                          {isDrop  && <span className="history-set-pill history-set-pill--drop">Drop</span>}
+                        </span>
+                      )}
                     </div>
                   )
                 })}
